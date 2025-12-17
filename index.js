@@ -4,6 +4,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const HINEY_NFT_SYMBOL = 'hiney_kin'; 
 
 // --- 1. FAKE SERVER (Updated for Render) ---
 const app = express();
@@ -58,6 +59,25 @@ async function getTokenPrice(address) {
   } catch (error) { return null; }
 }
 
+async function getNFTFloorPrice(symbol) {
+  try {
+    const url = `https://api-mainnet.magiceden.dev/v2/collections/${symbol}/stats`;
+    const response = await axios.get(url, { timeout: 5000 });
+    
+    // Magic Eden returns floorPrice in Lamports (1 SOL = 1,000,000,000 Lamports)
+    const floorInSol = response.data.floorPrice / 1000000000;
+    
+    return {
+      floor: floorInSol.toFixed(2),
+      listed: response.data.listedCount,
+      volume: (response.data.volumeAll / 1000000000).toFixed(0)
+    };
+  } catch (error) {
+    console.log("❌ NFT API Error:", error.message);
+    return null;
+  }
+}
+
 function getRandomMedia() {
   try {
     const memeFolder = path.join(__dirname, 'memes');
@@ -99,6 +119,25 @@ bot.command('price', async (ctx) => {
   if (media) await sendSmartMedia(ctx, media, msg);
   else await ctx.replyWithMarkdown(msg);
 });
+
+async function getNFTFloorPrice(symbol) {
+  try {
+    const url = `https://api-mainnet.magiceden.dev/v2/collections/${symbol}/stats`;
+    const response = await axios.get(url, { timeout: 5000 });
+    
+    // Magic Eden returns floorPrice in Lamports (1 SOL = 1,000,000,000 Lamports)
+    const floorInSol = response.data.floorPrice / 1000000000;
+    
+    return {
+      floor: floorInSol.toFixed(2),
+      listed: response.data.listedCount,
+      volume: (response.data.volumeAll / 1000000000).toFixed(0)
+    };
+  } catch (error) {
+    console.log("❌ NFT API Error:", error.message);
+    return null;
+  }
+}
 
 bot.command('launch', async (ctx) => {
   const isPrivate = ctx.chat.type === 'private';
