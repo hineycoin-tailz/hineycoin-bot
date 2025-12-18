@@ -25,7 +25,6 @@ app.listen(port, '0.0.0.0', () => {
 });
 
 // --- 3. BOT & DATABASE SETUP ---
-// Using Environment Variables for security
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -39,7 +38,7 @@ bot.use((ctx, next) => {
 
 // --- 5. FUNCTIONS ---
 
-// Fetch Token Prices (DexScreener)
+// Fetch Token Prices
 async function getTokenPrice(address) {
   try {
     const url = 'https://api.dexscreener.com/latest/dex/tokens/' + address;
@@ -50,17 +49,17 @@ async function getTokenPrice(address) {
       price: pair.priceUsd,
       change: pair.priceChange.h24,
       liq: pair.liquidity.usd,
-      vol: pair.volume.h24
+      vol: pair.volume.h24,
+      symbol: pair.baseToken.symbol
     };
   } catch (error) { return null; }
 }
 
-// Fetch NFT Floor Price (Magic Eden)
+// Fetch NFT Floor
 async function getNFTFloorPrice(symbol) {
   try {
     const url = `https://api-mainnet.magiceden.dev/v2/collections/${symbol}/stats`;
     const response = await axios.get(url, { timeout: 5000 });
-    
     const floorInSol = response.data.floorPrice / 1000000000;
     
     return {
@@ -74,16 +73,13 @@ async function getNFTFloorPrice(symbol) {
   }
 }
 
-// Safe File Picker (Ignores .gitkeep, .DS_Store, etc.)
+// Safe File Picker (Filters out system files)
 function getRandomMedia() {
   try {
     const memeFolder = path.join(__dirname, 'memes');
     if (!fs.existsSync(memeFolder)) return null;
     
     const files = fs.readdirSync(memeFolder);
-    
-    // FILTER: Only allow actual images/videos
-    // This PREVENTS the crash you saw earlier
     const validFiles = files.filter(file => {
       const ext = path.extname(file).toLowerCase();
       return ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi'].includes(ext);
@@ -94,7 +90,7 @@ function getRandomMedia() {
   } catch (error) { return null; }
 }
 
-// Smart Media Sender (Video/Photo/GIF)
+// Smart Media Sender
 async function sendSmartMedia(ctx, filePath, captionText) {
   const ext = path.extname(filePath).toLowerCase();
   const fileSource = { source: filePath };
@@ -105,8 +101,7 @@ async function sendSmartMedia(ctx, filePath, captionText) {
     else if (ext === '.gif') await ctx.replyWithAnimation(fileSource, options);
     else await ctx.replyWithPhoto(fileSource, options);
   } catch (error) {
-    console.log('⚠️ Media failed, sending text only. Error:', error.message);
-    // Fallback if media fails: send just the text
+    console.log('⚠️ Media failed, sending text fallback.');
     await ctx.replyWithMarkdown(captionText, { disable_web_page_preview: true });
   }
 }
@@ -114,38 +109,51 @@ async function sendSmartMedia(ctx, filePath, captionText) {
 // --- 6. COMMANDS ---
 
 bot.start(async (ctx) => {
-  ctx.reply('Welcome! Check prices to see fresh memes!');
+  ctx.reply('Welcome to HineyCoin! Commands:\n/price - Market Stats\n/hiney - HINEY Price\n/sol - SOL Price\n/floor - NFT Stats\n/meme - Random Meme\n/launch - Open App');
 });
 
-// /price Command
+// 1. /price (Combines HINEY + SOL)
 bot.command('price', async (ctx) => {
-  console.log('⚡ Price command triggered');
   const hiney = await getTokenPrice(HINEY_ADDRESS);
   const sol = await getTokenPrice(SOL_ADDRESS);
-
   let msg = '📊 **Market Snapshot**\n\n';
   if (hiney) msg += '🍑 $HINEY: $' + hiney.price + ' (' + hiney.change + '%)\n';
   if (sol)   msg += '☀️ $SOL: $' + sol.price + ' (' + sol.change + '%)';
-
+  
   const media = getRandomMedia();
   if (media) await sendSmartMedia(ctx, media, msg);
   else await ctx.replyWithMarkdown(msg);
 });
 
-// /floor Command
+// 2. /hiney (HINEY only)
+bot.command('hiney', async (ctx) => {
+  const hiney = await getTokenPrice(HINEY_ADDRESS);
+  if (!hiney) return ctx.reply('⚠️ Could not fetch HINEY price.');
+  
+  const msg = `🍑 **$HINEY**\nPrice: $${hiney.price}\nChange (24h): ${hiney.change}%`;
+  const media = getRandomMedia();
+  if (media) await sendSmartMedia(ctx, media, msg);
+  else await ctx.replyWithMarkdown(msg);
+});
+
+// 3. /sol (SOL only)
+bot.command('sol', async (ctx) => {
+  const sol = await getTokenPrice(SOL_ADDRESS);
+  if (!sol) return ctx.reply('⚠️ Could not fetch SOL price.');
+  
+  const msg = `☀️ **$SOL**\nPrice: $${sol.price}\nChange (24h): ${sol.change}%`;
+  await ctx.replyWithMarkdown(msg);
+});
+
+// 4. /floor (NFTs)
 bot.command('floor', async (ctx) => {
-  console.log('🖼 Floor command triggered');
   const nftData = await getNFTFloorPrice(HINEY_NFT_SYMBOL);
+  if (!nftData) return ctx.reply("❌ NFT Data Unavailable.");
 
-  if (!nftData) {
-    return ctx.reply("❌ Marketplace data currently unavailable. Check back soon!");
-  }
-
-  // We manually type the name to avoid Underscore errors in Markdown
   const msg = `🍑 **The Hiney-kin Stats**\n\n` +
-              `🧱 **Floor Price:** ${nftData.floor} SOL\n` +
-              `📦 **Items Listed:** ${nftData.listed}\n` +
-              `📊 **Total Volume:** ${nftData.volume} SOL\n\n` +
+              `🧱 **Floor:** ${nftData.floor} SOL\n` +
+              `📦 **Listed:** ${nftData.listed}\n` +
+              `📊 **Volume:** ${nftData.volume} SOL\n\n` +
               `🔗 [View on Magic Eden](https://magiceden.io/marketplace/${HINEY_NFT_SYMBOL})`;
 
   const media = getRandomMedia();
@@ -153,14 +161,24 @@ bot.command('floor', async (ctx) => {
   else await ctx.replyWithMarkdown(msg, { disable_web_page_preview: true });
 });
 
-// /launch Command
+// 5. /meme (Random Meme only)
+bot.command('meme', async (ctx) => {
+  const media = getRandomMedia();
+  if (media) await sendSmartMedia(ctx, media, "🍑 Fresh Hiney Meme!");
+  else ctx.reply("No memes found in the folder!");
+});
+
+// 6. /launch (Open App)
 bot.command('launch', async (ctx) => {
   const isPrivate = ctx.chat.type === 'private';
+  
+  // In private chat, we use web_app to open inside Telegram
+  // In groups, we use a URL button to link to the bot
   const button = isPrivate 
-    ? { text: '🚀 Launch App', web_app: { url: WEB_APP_URL } }
-    : { text: '🚀 Launch App', url: DIRECT_LINK };
+    ? { text: '🚀 Launch Hiney App', web_app: { url: WEB_APP_URL } }
+    : { text: '🚀 Launch Hiney App', url: DIRECT_LINK };
 
-  await ctx.reply('🍑 **Welcome!** Tap below:', {
+  await ctx.reply('🍑 **Tap to Launch:**', {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [[ button ]] }
   });
