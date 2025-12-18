@@ -38,12 +38,16 @@ bot.use((ctx, next) => {
 
 // --- 5. FUNCTIONS ---
 
-// Fetch Token Prices
+// --- UPDATED FUNCTION: Longer Timeout ---
 async function getTokenPrice(address) {
   try {
     const url = 'https://api.dexscreener.com/latest/dex/tokens/' + address;
-    const response = await axios.get(url, { timeout: 5000 });
+    // Increased timeout to 10000ms (10 seconds) to prevent "Cold Start" failures
+    const response = await axios.get(url, { timeout: 10000 });
+    
+    if (!response.data || !response.data.pairs) return null;
     const pair = response.data.pairs[0];
+    
     if (!pair) return null;
     return {
       price: pair.priceUsd,
@@ -52,7 +56,10 @@ async function getTokenPrice(address) {
       vol: pair.volume.h24,
       symbol: pair.baseToken.symbol
     };
-  } catch (error) { return null; }
+  } catch (error) { 
+    console.log(`⚠️ API Error for address ${address}: ${error.message}`);
+    return null; 
+  }
 }
 
 // Fetch NFT Floor
@@ -137,14 +144,25 @@ bot.start(async (ctx) => {
   ctx.reply('Welcome to HineyCoin! Commands:\n/price - Market Stats\n/hiney - HINEY Price\n/sol - SOL Price\n/floor - NFT Stats\n/meme - Random Meme\n/launch - Open App');
 });
 
-// 1. /price (Combines HINEY + SOL)
+// --- UPDATED COMMAND: Parallel Fetching ---
 bot.command('price', async (ctx) => {
-  const hiney = await getTokenPrice(HINEY_ADDRESS);
-  const sol = await getTokenPrice(SOL_ADDRESS);
+  // 1. Fetch BOTH tokens at the same time (Twice as fast)
+  const [hiney, sol] = await Promise.all([
+    getTokenPrice(HINEY_ADDRESS),
+    getTokenPrice(SOL_ADDRESS)
+  ]);
+
+  // 2. Check if both failed (Cold Start protection)
+  if (!hiney && !sol) {
+    return ctx.reply("⏳ Market data is waking up... please try again in 5 seconds!");
+  }
+
+  // 3. Build the message
   let msg = '📊 **Market Snapshot**\n\n';
   if (hiney) msg += '🍑 $HINEY: $' + hiney.price + ' (' + hiney.change + '%)\n';
   if (sol)   msg += '☀️ $SOL: $' + sol.price + ' (' + sol.change + '%)';
   
+  // 4. Send media
   const media = getRandomMedia();
   if (media) await sendSmartMedia(ctx, media, msg);
   else await ctx.replyWithMarkdown(msg);
