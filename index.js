@@ -73,21 +73,46 @@ async function getNFTFloorPrice(symbol) {
   }
 }
 
-// Safe File Picker (Filters out system files)
+// --- UPDATED: SMART FOLDER FINDER ---
 function getRandomMedia() {
   try {
-    const memeFolder = path.join(__dirname, 'memes');
-    if (!fs.existsSync(memeFolder)) return null;
+    // 1. Try lowercase 'memes'
+    let memeFolder = path.join(__dirname, 'memes');
     
+    // 2. If lowercase doesn't exist, try Capital 'Memes'
+    if (!fs.existsSync(memeFolder)) {
+      console.log("⚠️ Lowercase 'memes' not found. Trying 'Memes'...");
+      memeFolder = path.join(__dirname, 'Memes');
+    }
+
+    // 3. If BOTH fail, print what folders actually exist (Debug)
+    if (!fs.existsSync(memeFolder)) {
+      console.log("❌ CRITICAL: Could not find 'memes' or 'Memes' folder!");
+      console.log("📂 Folders in current directory:", fs.readdirSync(__dirname));
+      return null;
+    }
+
+    // 4. Read files
     const files = fs.readdirSync(memeFolder);
+    
+    // 5. Filter for images/videos
     const validFiles = files.filter(file => {
       const ext = path.extname(file).toLowerCase();
-      return ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi'].includes(ext);
+      return ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov'].includes(ext);
     });
 
-    if (validFiles.length === 0) return null;
+    if (validFiles.length === 0) {
+      console.log("⚠️ Folder found, but it was empty!");
+      return null;
+    }
+
+    console.log(`✅ Success! Found ${validFiles.length} memes.`);
     return path.join(memeFolder, validFiles[Math.floor(Math.random() * validFiles.length)]);
-  } catch (error) { return null; }
+
+  } catch (error) { 
+    console.log("❌ Error finding memes:", error.message); 
+    return null; 
+  }
 }
 
 // Smart Media Sender
