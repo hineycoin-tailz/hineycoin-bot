@@ -11,6 +11,10 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 const MIN_SALE_PRICE = 0.01; 
+
+// 🔗 DIRECT APP LINK (Works in Groups!)
+// Ensure you named your app 'app' in BotFather. If not, use 'https://t.me/Hineycoinbot'
+const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
 const WEB_APP_URL = 'https://hiney-miniapp-jivkkyha7-hineycoin-tailzs-projects.vercel.app/';
 
 // --- 2. SETUP ---
@@ -31,7 +35,7 @@ const twitterClient = new TwitterApi({
 
 // --- 3. HELPER FUNCTIONS ---
 
-// A. Get Token Price (DexScreener)
+// A. Get Token Price
 async function getTokenPrice(address) {
   try {
     const url = 'https://api.dexscreener.com/latest/dex/tokens/' + address;
@@ -42,7 +46,7 @@ async function getTokenPrice(address) {
   } catch (error) { return null; }
 }
 
-// B. Get NFT Floor (Magic Eden)
+// B. Get NFT Floor
 async function getNFTFloorPrice(symbol) {
   try {
     const url = `https://api-mainnet.magiceden.dev/v2/collections/${symbol}/stats`;
@@ -55,19 +59,16 @@ async function getNFTFloorPrice(symbol) {
 // C. Smart Responder (Sends Text + Random Meme)
 async function replyWithMeme(ctx, captionText) {
   try {
-    // 1. Find the folder
     let memeFolder = path.join(__dirname, 'memes');
     if (!fs.existsSync(memeFolder)) memeFolder = path.join(__dirname, 'Memes');
     
-    // 2. Check for files
     if (fs.existsSync(memeFolder)) {
       const files = fs.readdirSync(memeFolder);
       const validFiles = files.filter(file => ['.jpg', '.jpeg', '.png', '.gif', '.mp4'].includes(path.extname(file).toLowerCase()));
       
-      console.log(`📂 Meme Check: Found ${validFiles.length} images in ${memeFolder}`); // DEBUG LOG
+      console.log(`📂 Meme Check: Found ${validFiles.length} images`); 
 
       if (validFiles.length > 0) {
-        // 3. Pick Random & Send
         const randomFile = validFiles[Math.floor(Math.random() * validFiles.length)];
         const filePath = path.join(memeFolder, randomFile);
         const ext = path.extname(randomFile).toLowerCase();
@@ -78,30 +79,33 @@ async function replyWithMeme(ctx, captionText) {
         if (['.mp4', '.mov'].includes(ext)) await ctx.replyWithVideo(fileSource, options);
         else if (ext === '.gif') await ctx.replyWithAnimation(fileSource, options);
         else await ctx.replyWithPhoto(fileSource, options);
-        return; // Success! Exit function.
+        return; 
       }
-    } else {
-        console.log("⚠️ Meme folder not found on server!");
     }
-  } catch (error) {
-    console.error("❌ Meme Send Error:", error.message);
-  }
+  } catch (error) { console.error("❌ Meme Error:", error.message); }
 
-  // Fallback: If no meme found or error, just send text
   await ctx.replyWithHTML(captionText);
 }
 
 // --- 4. COMMANDS ---
 
 bot.start((ctx) => {
+    // Uses DIRECT_LINK so it works in groups too
     ctx.reply("🍑 **Welcome to HineyCoin!**\n\nClick below to open the Hiney App or use /price to see stats.", {
         parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([[Markup.button.webApp("🚀 Launch Hiney App", WEB_APP_URL)]])
+        ...Markup.inlineKeyboard([
+            [Markup.button.url("🚀 Launch Hiney App", DIRECT_LINK)]
+        ])
     });
 });
 
 bot.command('launch', (ctx) => {
-    ctx.reply("🚀 Click to Launch:", { ...Markup.inlineKeyboard([[Markup.button.webApp("Open Hiney App 🍑", WEB_APP_URL)]]) });
+    // Uses DIRECT_LINK so it works in groups too
+    ctx.reply("🚀 Click to Launch:", { 
+        ...Markup.inlineKeyboard([
+            [Markup.button.url("Open Hiney App 🍑", DIRECT_LINK)]
+        ]) 
+    });
 });
 
 bot.command('meme', async (ctx) => {
@@ -161,7 +165,6 @@ app.post('/webhook', async (req, res) => {
           catch (e) { console.error(`❌ TG Fail: ${e.message}`); }
       }
       
-      // Twitter logic simplified for brevity (re-add if needed, or use previous version's block)
       try {
         const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price} SOL!\n#Solana $HINEY`;
         const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
