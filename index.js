@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf'); // Added Markup for Buttons
 const { TwitterApi } = require('twitter-api-v2');
 const axios = require('axios');
 const express = require('express');
@@ -9,6 +9,9 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 const MIN_SALE_PRICE = 0.01; 
+
+// 📱 MINI APP LINKS
+const WEB_APP_URL = 'https://hiney-miniapp-jivkkyha7-hineycoin-tailzs-projects.vercel.app/';
 
 // --- 2. DEBUG & SETUP ---
 console.log("🔍 Checking Environment Variables...");
@@ -52,7 +55,26 @@ async function getNFTFloorPrice(symbol) {
 
 // --- 4. COMMANDS ---
 
-// COMMAND: /price (Shows Hiney + Sol)
+// COMMAND: /start (Shows Launch Button)
+bot.start((ctx) => {
+    ctx.reply("🍑 **Welcome to HineyCoin!**\n\nClick below to open the Hiney App or use /price to see stats.", {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+            [Markup.button.webApp("🚀 Launch Hiney App", WEB_APP_URL)]
+        ])
+    });
+});
+
+// COMMAND: /launch (Directly Launches App)
+bot.command('launch', (ctx) => {
+    ctx.reply("🚀 Click to Launch:", {
+        ...Markup.inlineKeyboard([
+            [Markup.button.webApp("Open Hiney App 🍑", WEB_APP_URL)]
+        ])
+    });
+});
+
+// COMMAND: /price
 bot.command('price', async (ctx) => {
   const [hiney, sol] = await Promise.all([getTokenPrice(HINEY_ADDRESS), getTokenPrice(SOL_ADDRESS)]);
   let msg = '📊 <b>Market Snapshot</b>\n\n';
@@ -61,14 +83,14 @@ bot.command('price', async (ctx) => {
   ctx.replyWithHTML(msg);
 });
 
-// COMMAND: /hiney (Shows Hiney Only)
+// COMMAND: /hiney
 bot.command('hiney', async (ctx) => {
   const hiney = await getTokenPrice(HINEY_ADDRESS);
   if (hiney) ctx.replyWithHTML(`🍑 <b>$HINEY Price:</b> $${hiney.price} \n📈 <b>24h Change:</b> ${hiney.change}%`);
   else ctx.reply("❌ Could not fetch Hiney price.");
 });
 
-// COMMAND: /sol (Shows Sol Only)
+// COMMAND: /sol
 bot.command('sol', async (ctx) => {
   const sol = await getTokenPrice(SOL_ADDRESS);
   if (sol) ctx.replyWithHTML(`☀️ <b>$SOL Price:</b> $${sol.price} \n📈 <b>24h Change:</b> ${sol.change}%`);
@@ -132,7 +154,7 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-// STARTUP SEQUENCE (The Fix)
+// STARTUP SEQUENCE
 app.listen(port, '0.0.0.0', async () => { 
   console.log(`🌐 Webhook listening on port ${port}`);
   
