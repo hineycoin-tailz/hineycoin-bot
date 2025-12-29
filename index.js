@@ -10,9 +10,8 @@ const path = require('path');
 const HINEY_NFT_SYMBOL = 'hiney_kin'; 
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
-
-// ⚠️ DEBUG MODE: PRICE FILTER REMOVED (Set to 0)
-const MIN_SALE_PRICE = 0; 
+const GENERIC_IMAGE = "https://hineycoin.online/images/logo.png"; // Fallback Image
+const MIN_SALE_PRICE = 0.001; // Avoid 0 SOL transfers
 const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
 
 // --- 2. SETUP ---
@@ -55,19 +54,15 @@ async function replyWithMeme(ctx, captionText) {
   try {
     let memeFolder = path.join(__dirname, 'memes');
     if (!fs.existsSync(memeFolder)) memeFolder = path.join(__dirname, 'Memes');
-    
     if (fs.existsSync(memeFolder)) {
       const files = fs.readdirSync(memeFolder);
       const validFiles = files.filter(file => ['.jpg', '.jpeg', '.png', '.gif', '.mp4'].includes(path.extname(file).toLowerCase()));
-      
       if (validFiles.length > 0) {
         const randomFile = validFiles[Math.floor(Math.random() * validFiles.length)];
         const filePath = path.join(memeFolder, randomFile);
         const ext = path.extname(randomFile).toLowerCase();
-        
         const fileSource = { source: fs.createReadStream(filePath) };
         const options = { caption: captionText, parse_mode: 'HTML' };
-
         if (['.mp4', '.mov'].includes(ext)) await ctx.replyWithVideo(fileSource, options);
         else if (ext === '.gif') await ctx.replyWithAnimation(fileSource, options);
         else await ctx.replyWithPhoto(fileSource, options);
@@ -78,7 +73,7 @@ async function replyWithMeme(ctx, captionText) {
   await ctx.replyWithHTML(captionText);
 }
 
-// --- 4. COMMANDS ---
+// --- 4. COMMANDS (ALL RESTORED) ---
 bot.start((ctx) => {
     ctx.reply("🍑 **Welcome to HineyCoin!**\n\nClick below to open the Hiney App or use /price to see stats.", {
         parse_mode: 'Markdown',
@@ -121,61 +116,83 @@ bot.command('floor', async (ctx) => {
   await replyWithMeme(ctx, msg);
 });
 
-// --- 5. SERVER ---
+// --- 5. SERVER & WEBHOOK (THE FIX) ---
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Hineycoinbot is Alive'); });
 
 app.post('/webhook', async (req, res) => {
-  // 🟢 1. LOG ARRIVAL
-  console.log("📥 Webhook Hit! Helius is talking to us.");
-  
+  console.log("📥 Webhook Hit!");
   const events = req.body;
-  if (!events) return res.sendStatus(400);
-
-  // 🔍 LOG THE RAW DATA (So we can see the MPL Core structure)
-  try {
-      console.log("🔍 Payload Preview:", JSON.stringify(events).slice(0, 500));
-  } catch(e) {}
-
-  if (!Array.isArray(events)) return res.sendStatus(400);
+  if (!events || !Array.isArray(events)) return res.sendStatus(400);
 
   for (const event of events) {
-    console.log(`🔎 Event Type: ${event.type}`);
+    console.log(`🔎 Processing Event: ${event.type}`);
 
-    // 🛡️ SAFETY SHIELD: Ignore Tests/Empty Data
-    if (!event.nfts || !event.nfts[0]) {
-        console.log("⚠️ Event has no NFT data (likely a Test Ping or non-sale). Skipping.");
-        continue; // Skip this event, don't crash!
+    // --- A. METADATA EXTRACTION ---
+    let nftName = "Hiney-Kin (Unknown)";
+    let imageUrl = GENERIC_IMAGE;
+    let mintAddress = null;
+
+    // 1. Preferred: Enhanced Webhook Structure (Singular Object)
+    if (event.nft) {
+        const nft = event.nft;
+        nftName = nft.name || nftName;
+        imageUrl = nft.metadata?.image || imageUrl;
+        mintAddress = nft.mint || mintAddress;
+    }
+    // 2. Fallback: Batch/Legacy Structure (Array)
+    else if (event.nfts && event.nfts.length > 0) {
+        const nft = event.nfts[0];
+        nftName = nft.name || nftName;
+        imageUrl = nft.metadata?.image || imageUrl;
+        mintAddress = nft.mint || mintAddress;
+    }
+    // 3. Last Resort: Guess from Account Data (For UNKNOWN events)
+    else if (event.accountData && event.accountData.length > 0) {
+        mintAddress = event.accountData[0].account || null;
+        console.warn("⚠️ Falling back to accountData guess");
     }
 
-    if (event.type === 'NFT_SALE') {
-      const price = event.amount / 1_000_000_000;
-      console.log(`💰 Sale Detected: ${price} SOL`);
+    // --- B. PRICE CALCULATION ---
+    let price = 0;
+    if (event.amount) {
+        // Preferred: Direct Amount
+        price = event.amount / 1_000_000_000;
+    } else if (event.nativeTransfers && event.nativeTransfers.length > 0) {
+        // Fallback: Sum of Transfers (Vital for MPL Core/Unknown events)
+        const total = event.nativeTransfers.reduce((acc, tx) => acc + tx.amount, 0);
+        price = total / 1_000_000_000;
+    }
 
-      if (price < MIN_SALE_PRICE) continue;
+    // --- C. FILTERING (Stops False Alarms) ---
+    if (price < MIN_SALE_PRICE) {
+        console.log(`⚠️ Price too low (${price} SOL). Skipping.`);
+        continue;
+    }
+    
+    // --- D. ACTION ---
+    console.log(`💰 VALID SALE: ${price} SOL - ${nftName}`);
 
-      const nftMint = event.nfts[0].mint;
-      const nftName = event.nfts[0].name || "Hiney-Kin";
-      const imageUrl = event.nfts[0].metadata?.image || "https://hineycoin.online/logo.png";
-      
-      const caption = `🚨 <b>HINEY-KIN ADOPTED!</b> 🚨\n\n` +
-                      `🖼️ <b>${nftName}</b>\n💰 Sold for: <b>${price} SOL</b>\n` +
-                      `<a href="https://magiceden.io/item-details/${nftMint}">View on Magic Eden</a>`;
+    const caption = `🚨 <b>HINEY-KIN ADOPTED!</b> 🚨\n\n` +
+                    `🖼️ <b>${nftName}</b>\n💰 Sold for: <b>${price.toFixed(4)} SOL</b>\n` +
+                    `🔗 <a href="https://solscan.io/tx/${event.signature}">View Transaction</a>`;
 
-      const rawIds = process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID;
-      for (const chatId of rawIds.split(',')) {
-          try { await bot.telegram.sendPhoto(chatId.trim(), imageUrl, { caption: caption, parse_mode: 'HTML' }); } 
-          catch (e) { console.error(`❌ TG Fail: ${e.message}`); }
-      }
-      
-      try {
-        const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price} SOL!\n#Solana $HINEY`;
+    const rawIds = process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID;
+    if (rawIds) {
+        for (const chatId of rawIds.split(',')) {
+            try { 
+                await bot.telegram.sendPhoto(chatId.trim(), imageUrl, { caption: caption, parse_mode: 'HTML' }); 
+            } catch (e) { console.error(`❌ TG Fail: ${e.message}`); }
+        }
+    }
+
+    try {
+        const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
         const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
         const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
-        await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://magiceden.io/item-details/${nftMint}`, media: { media_ids: [mediaId] } });
+        await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, media: { media_ids: [mediaId] } });
         console.log(`✅ Posted to X`);
-      } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
-    }
+    } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
   }
   res.sendStatus(200);
 });
