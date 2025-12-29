@@ -10,8 +10,11 @@ const path = require('path');
 const HINEY_NFT_SYMBOL = 'hiney_kin'; 
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
-const GENERIC_IMAGE = "https://hineycoin.online/images/logo.png"; // Fallback Image
-const MIN_SALE_PRICE = 0.001; // Avoid 0 SOL transfers
+
+// ✅ CHANGED: Used GitHub link because Twitter links (pbs.twimg) block bots (Error 400)
+const GENERIC_IMAGE = "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png"; 
+
+const MIN_SALE_PRICE = 0.035; // Avoid 0 SOL transfers
 const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
 
 // --- 2. SETUP ---
@@ -73,7 +76,7 @@ async function replyWithMeme(ctx, captionText) {
   await ctx.replyWithHTML(captionText);
 }
 
-// --- 4. COMMANDS (ALL RESTORED) ---
+// --- 4. COMMANDS ---
 bot.start((ctx) => {
     ctx.reply("🍑 **Welcome to HineyCoin!**\n\nClick below to open the Hiney App or use /price to see stats.", {
         parse_mode: 'Markdown',
@@ -116,14 +119,17 @@ bot.command('floor', async (ctx) => {
   await replyWithMeme(ctx, msg);
 });
 
-// --- 5. SERVER & WEBHOOK (THE FIX) ---
+// --- 5. SERVER & WEBHOOK ---
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Hineycoinbot is Alive'); });
 
 app.post('/webhook', async (req, res) => {
-  console.log("📥 Webhook Hit!");
+  // 🟢 TIMEOUT FIX: Reply to Helius IMMEDIATELY so it doesn't disconnect.
+  res.sendStatus(200);
+
+  console.log("📥 Webhook Hit! (Processing in background)");
   const events = req.body;
-  if (!events || !Array.isArray(events)) return res.sendStatus(400);
+  if (!events || !Array.isArray(events)) return; 
 
   for (const event of events) {
     console.log(`🔎 Processing Event: ${event.type}`);
@@ -133,21 +139,18 @@ app.post('/webhook', async (req, res) => {
     let imageUrl = GENERIC_IMAGE;
     let mintAddress = null;
 
-    // 1. Preferred: Enhanced Webhook Structure (Singular Object)
     if (event.nft) {
         const nft = event.nft;
         nftName = nft.name || nftName;
         imageUrl = nft.metadata?.image || imageUrl;
         mintAddress = nft.mint || mintAddress;
     }
-    // 2. Fallback: Batch/Legacy Structure (Array)
     else if (event.nfts && event.nfts.length > 0) {
         const nft = event.nfts[0];
         nftName = nft.name || nftName;
         imageUrl = nft.metadata?.image || imageUrl;
         mintAddress = nft.mint || mintAddress;
     }
-    // 3. Last Resort: Guess from Account Data (For UNKNOWN events)
     else if (event.accountData && event.accountData.length > 0) {
         mintAddress = event.accountData[0].account || null;
         console.warn("⚠️ Falling back to accountData guess");
@@ -156,15 +159,14 @@ app.post('/webhook', async (req, res) => {
     // --- B. PRICE CALCULATION ---
     let price = 0;
     if (event.amount) {
-        // Preferred: Direct Amount
         price = event.amount / 1_000_000_000;
     } else if (event.nativeTransfers && event.nativeTransfers.length > 0) {
-        // Fallback: Sum of Transfers (Vital for MPL Core/Unknown events)
         const total = event.nativeTransfers.reduce((acc, tx) => acc + tx.amount, 0);
         price = total / 1_000_000_000;
     }
 
-    // --- C. FILTERING (Stops False Alarms) ---
+    // --- C. FILTERING ---
+    // ⚠️ CRITICAL: Ensure your test transfer is > 0.035 SOL or it will skip here!
     if (price < MIN_SALE_PRICE) {
         console.log(`⚠️ Price too low (${price} SOL). Skipping.`);
         continue;
@@ -194,7 +196,7 @@ app.post('/webhook', async (req, res) => {
         console.log(`✅ Posted to X`);
     } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
   }
-  res.sendStatus(200);
+  // (We already sent status 200 at the top, so no need to send it again here)
 });
 
 app.listen(port, '0.0.0.0', async () => { 
