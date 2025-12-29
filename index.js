@@ -10,12 +10,10 @@ const path = require('path');
 const HINEY_NFT_SYMBOL = 'hiney_kin'; 
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
-const MIN_SALE_PRICE = 0.01; 
 
-// 🔗 DIRECT APP LINK (Works in Groups!)
-// Ensure you named your app 'app' in BotFather. If not, use 'https://t.me/Hineycoinbot'
+// ⚠️ DEBUG MODE: PRICE FILTER REMOVED (Set to 0)
+const MIN_SALE_PRICE = 0; 
 const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
-const WEB_APP_URL = 'https://hiney-miniapp-jivkkyha7-hineycoin-tailzs-projects.vercel.app/';
 
 // --- 2. SETUP ---
 if (!process.env.TELEGRAM_CHAT_IDS && !process.env.TELEGRAM_CHAT_ID) {
@@ -34,8 +32,6 @@ const twitterClient = new TwitterApi({
 });
 
 // --- 3. HELPER FUNCTIONS ---
-
-// A. Get Token Price
 async function getTokenPrice(address) {
   try {
     const url = 'https://api.dexscreener.com/latest/dex/tokens/' + address;
@@ -46,7 +42,6 @@ async function getTokenPrice(address) {
   } catch (error) { return null; }
 }
 
-// B. Get NFT Floor
 async function getNFTFloorPrice(symbol) {
   try {
     const url = `https://api-mainnet.magiceden.dev/v2/collections/${symbol}/stats`;
@@ -56,7 +51,6 @@ async function getNFTFloorPrice(symbol) {
   } catch (error) { return null; }
 }
 
-// C. Smart Responder (Sends Text + Random Meme)
 async function replyWithMeme(ctx, captionText) {
   try {
     let memeFolder = path.join(__dirname, 'memes');
@@ -66,14 +60,12 @@ async function replyWithMeme(ctx, captionText) {
       const files = fs.readdirSync(memeFolder);
       const validFiles = files.filter(file => ['.jpg', '.jpeg', '.png', '.gif', '.mp4'].includes(path.extname(file).toLowerCase()));
       
-      console.log(`📂 Meme Check: Found ${validFiles.length} images`); 
-
       if (validFiles.length > 0) {
         const randomFile = validFiles[Math.floor(Math.random() * validFiles.length)];
         const filePath = path.join(memeFolder, randomFile);
         const ext = path.extname(randomFile).toLowerCase();
         
-        const fileSource = { source: filePath };
+        const fileSource = { source: fs.createReadStream(filePath) };
         const options = { caption: captionText, parse_mode: 'HTML' };
 
         if (['.mp4', '.mov'].includes(ext)) await ctx.replyWithVideo(fileSource, options);
@@ -83,34 +75,24 @@ async function replyWithMeme(ctx, captionText) {
       }
     }
   } catch (error) { console.error("❌ Meme Error:", error.message); }
-
   await ctx.replyWithHTML(captionText);
 }
 
 // --- 4. COMMANDS ---
-
 bot.start((ctx) => {
-    // Uses DIRECT_LINK so it works in groups too
     ctx.reply("🍑 **Welcome to HineyCoin!**\n\nClick below to open the Hiney App or use /price to see stats.", {
         parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-            [Markup.button.url("🚀 Launch Hiney App", DIRECT_LINK)]
-        ])
+        ...Markup.inlineKeyboard([[Markup.button.url("🚀 Launch Hiney App", DIRECT_LINK)]])
     });
 });
 
 bot.command('launch', (ctx) => {
-    // Uses DIRECT_LINK so it works in groups too
     ctx.reply("🚀 Click to Launch:", { 
-        ...Markup.inlineKeyboard([
-            [Markup.button.url("Open Hiney App 🍑", DIRECT_LINK)]
-        ]) 
+        ...Markup.inlineKeyboard([[Markup.button.url("Open Hiney App 🍑", DIRECT_LINK)]]) 
     });
 });
 
-bot.command('meme', async (ctx) => {
-    await replyWithMeme(ctx, "🍑 <b>Fresh Hiney Meme!</b>");
-});
+bot.command('meme', async (ctx) => { await replyWithMeme(ctx, "🍑 <b>Fresh Hiney Meme!</b>"); });
 
 bot.command('price', async (ctx) => {
   const [hiney, sol] = await Promise.all([getTokenPrice(HINEY_ADDRESS), getTokenPrice(SOL_ADDRESS)]);
@@ -144,13 +126,34 @@ const port = process.env.PORT || 3000;
 app.get('/', (req, res) => { res.send('Hineycoinbot is Alive'); });
 
 app.post('/webhook', async (req, res) => {
+  // 🟢 1. LOG ARRIVAL
+  console.log("📥 Webhook Hit! Helius is talking to us.");
+  
   const events = req.body;
-  if (!events || !Array.isArray(events)) return res.sendStatus(400);
+  if (!events) return res.sendStatus(400);
+
+  // 🔍 LOG THE RAW DATA (So we can see the MPL Core structure)
+  try {
+      console.log("🔍 Payload Preview:", JSON.stringify(events).slice(0, 500));
+  } catch(e) {}
+
+  if (!Array.isArray(events)) return res.sendStatus(400);
 
   for (const event of events) {
+    console.log(`🔎 Event Type: ${event.type}`);
+
+    // 🛡️ SAFETY SHIELD: Ignore Tests/Empty Data
+    if (!event.nfts || !event.nfts[0]) {
+        console.log("⚠️ Event has no NFT data (likely a Test Ping or non-sale). Skipping.");
+        continue; // Skip this event, don't crash!
+    }
+
     if (event.type === 'NFT_SALE') {
       const price = event.amount / 1_000_000_000;
+      console.log(`💰 Sale Detected: ${price} SOL`);
+
       if (price < MIN_SALE_PRICE) continue;
+
       const nftMint = event.nfts[0].mint;
       const nftName = event.nfts[0].name || "Hiney-Kin";
       const imageUrl = event.nfts[0].metadata?.image || "https://hineycoin.online/logo.png";
@@ -170,6 +173,7 @@ app.post('/webhook', async (req, res) => {
         const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
         const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
         await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://magiceden.io/item-details/${nftMint}`, media: { media_ids: [mediaId] } });
+        console.log(`✅ Posted to X`);
       } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
     }
   }
