@@ -20,9 +20,8 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
-// ✅ CHANGED: Used GitHub link because Twitter links (pbs.twimg) block bots (Error 400)
-const GENERIC_IMAGE = "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png"; 
-
+// ✅ VIDEO LINK (This is your detective video)
+const GENERIC_IMAGE = "https://github.com/YOUR_USER/YOUR_REPO/raw/main/detective.MP4"; 
 const MIN_SALE_PRICE = 0.035; // Avoid 0 SOL transfers
 const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
 
@@ -35,14 +34,59 @@ if (!process.env.TELEGRAM_CHAT_IDS && !process.env.TELEGRAM_CHAT_ID) {
 const app = express();
 app.use(express.json()); 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const twitterClient = new TwitterApi({
-  appKey: process.env.TWITTER_API_KEY,
-  appSecret: process.env.TWITTER_API_SECRET,
-  accessToken: process.env.TWITTER_ACCESS_TOKEN,
-  accessSecret: process.env.TWITTER_ACCESS_SECRET,
-});
+
+// Twitter Setup (Wrapped in try/catch in case keys are missing)
+let twitterClient = null;
+try {
+    twitterClient = new TwitterApi({
+        appKey: process.env.TWITTER_API_KEY,
+        appSecret: process.env.TWITTER_API_SECRET,
+        accessToken: process.env.TWITTER_ACCESS_TOKEN,
+        accessSecret: process.env.TWITTER_ACCESS_SECRET,
+    });
+} catch (e) { console.log("⚠️ Twitter keys missing, skipping Twitter setup."); }
+
 
 // --- 3. HELPER FUNCTIONS ---
+
+// 🆕 NEW FUNCTION: Handles Video vs Photo switching
+async function postSaleToTelegram(nftName, price, image, signature) {
+    const message = `
+🚨 *HINEY-KIN ADOPTED!* 🚨
+
+🍑 *Asset:* ${nftName}
+💰 *Price:* ${price.toFixed(4)} SOL
+🔗 [View Transaction](https://solscan.io/tx/${signature}) | [Open Hiney App](${DIRECT_LINK})
+`;
+
+    // Get Chat IDs (support single or multiple)
+    const rawIds = process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID;
+    const chatIds = rawIds.split(',').map(id => id.trim());
+
+    for (const chatId of chatIds) {
+        try {
+            // CHECK: Is the image a Video? (Ends in .mp4 or .MP4)
+            if (image.toLowerCase().endsWith('.mp4')) {
+                await bot.telegram.sendVideo(chatId, image, {
+                    caption: message,
+                    parse_mode: 'Markdown'
+                });
+                console.log(`📹 Sent Video to ${chatId}`);
+            } 
+            // OTHERWISE: It's a standard Photo
+            else {
+                await bot.telegram.sendPhoto(chatId, image, {
+                    caption: message,
+                    parse_mode: 'Markdown'
+                });
+                console.log(`📸 Sent Photo to ${chatId}`);
+            }
+        } catch (error) {
+            console.error(`❌ TG Error for ${chatId}:`, error.message);
+        }
+    }
+}
+
 async function getTokenPrice(address) {
   try {
     const url = 'https://api.dexscreener.com/latest/dex/tokens/' + address;
@@ -131,12 +175,12 @@ bot.command('floor', async (ctx) => {
 // --- 5. SERVER & WEBHOOK ---
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => { 
-    console.log("💓 Ping! Staying alive..."); // <--- Add this line
+    console.log("💓 Ping! Staying alive..."); 
     res.send('Hineycoinbot is Alive'); 
 });
 
 app.post('/webhook', async (req, res) => {
-  // 🟢 TIMEOUT FIX: Reply to Helius IMMEDIATELY so it doesn't disconnect.
+  // 🟢 TIMEOUT FIX: Reply to Helius IMMEDIATELY
   res.sendStatus(200);
 
   console.log("📥 Webhook Hit! (Processing in background)");
@@ -146,9 +190,9 @@ app.post('/webhook', async (req, res) => {
   for (const event of events) {
     console.log(`🔎 Processing Event: ${event.type}`);
 
-  // --- A. METADATA EXTRACTION ---
+    // --- A. METADATA EXTRACTION ---
     let nftName = "Hiney-Kin (Unknown)";
-    let imageUrl = GENERIC_IMAGE; // Start with the fallback
+    let imageUrl = GENERIC_IMAGE; // Start with the fallback (Video or Image)
     let mintAddress = null;
 
     // 1. Get the Mint Address
@@ -159,23 +203,20 @@ app.post('/webhook', async (req, res) => {
     // 2. INTELLIGENT LOOKUP (Check local file first!)
     if (mintAddress && nftLookup[mintAddress]) {
         // ✅ FOUND IN FILE
-        nftName = nftLookup[mintAddress].name;   // Get Name from file
+        nftName = nftLookup[mintAddress].name;   
         
-        if (nftLookup[mintAddress].image) {      // <--- NEW: Get Image from file
+        // If file has image, USE IT. Otherwise keep using GENERIC_IMAGE
+        if (nftLookup[mintAddress].image) {      
             imageUrl = nftLookup[mintAddress].image;
         }
     } 
     // 3. FALLBACK (If not in file, try Helius data)
     else {
         if (event.nft && event.nft.name) nftName = event.nft.name;
+        // Only overwrite imageUrl if Helius actually provides one
         if (event.nft && event.nft.metadata && event.nft.metadata.image) {
             imageUrl = event.nft.metadata.image;
         }
-    }
-
-    // 4. Get Image (Use fallback if Helius sends nothing)
-    if (event.nft && event.nft.metadata && event.nft.metadata.image) {
-        imageUrl = event.nft.metadata.image;
     }
 
     // --- B. PRICE CALCULATION ---
@@ -188,7 +229,6 @@ app.post('/webhook', async (req, res) => {
     }
 
     // --- C. FILTERING ---
-    // ⚠️ CRITICAL: Ensure your test transfer is > 0.035 SOL or it will skip here!
     if (price < MIN_SALE_PRICE) {
         console.log(`⚠️ Price too low (${price} SOL). Skipping.`);
         continue;
@@ -197,28 +237,28 @@ app.post('/webhook', async (req, res) => {
     // --- D. ACTION ---
     console.log(`💰 VALID SALE: ${price} SOL - ${nftName}`);
 
-    const caption = `🚨 <b>HINEY-KIN ADOPTED!</b> 🚨\n\n` +
-                    `🖼️ <b>${nftName}</b>\n💰 Sold for: <b>${price.toFixed(4)} SOL</b>\n` +
-                    `🔗 <a href="https://solscan.io/tx/${event.signature}">View Transaction</a>`;
+    // 1. Send to Telegram (Handles Video vs Photo automatically)
+    await postSaleToTelegram(nftName, price, imageUrl, event.signature);
 
-    const rawIds = process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID;
-    if (rawIds) {
-        for (const chatId of rawIds.split(',')) {
-            try { 
-                await bot.telegram.sendPhoto(chatId.trim(), imageUrl, { caption: caption, parse_mode: 'HTML' }); 
-            } catch (e) { console.error(`❌ TG Fail: ${e.message}`); }
-        }
+    // 2. Send to Twitter (Only if configured)
+    if (twitterClient) {
+        try {
+            const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
+            // Note: Twitter API requires image buffers. 
+            // If imageUrl is an mp4, this simple upload might fail, so we wrap in try/catch.
+            if (!imageUrl.endsWith('.mp4') && !imageUrl.endsWith('.MP4')) {
+                const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
+                const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
+                await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, media: { media_ids: [mediaId] } });
+                console.log(`✅ Posted to X`);
+            } else {
+                 // Fallback for video tweets (Just text for now to be safe)
+                 await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}` });
+                 console.log(`✅ Posted to X (Text Only for Video)`);
+            }
+        } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
     }
-
-    try {
-        const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
-        const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
-        const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
-        await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, media: { media_ids: [mediaId] } });
-        console.log(`✅ Posted to X`);
-    } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
   }
-  // (We already sent status 200 at the top, so no need to send it again here)
 });
 
 app.listen(port, '0.0.0.0', async () => { 
