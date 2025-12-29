@@ -148,21 +148,29 @@ app.post('/webhook', async (req, res) => {
 
   // --- A. METADATA EXTRACTION ---
     let nftName = "Hiney-Kin (Unknown)";
-    let imageUrl = GENERIC_IMAGE;
+    let imageUrl = GENERIC_IMAGE; // Start with the fallback
     let mintAddress = null;
 
-    // 1. Get the Mint Address first (we need this to look up the name!)
+    // 1. Get the Mint Address
     if (event.nft) mintAddress = event.nft.mint;
     else if (event.nfts && event.nfts.length > 0) mintAddress = event.nfts[0].mint;
     else if (event.accountData && event.accountData.length > 0) mintAddress = event.accountData[0].account;
 
-    // 2. LOOKUP: Check our local file for the Real Name
+    // 2. INTELLIGENT LOOKUP (Check local file first!)
     if (mintAddress && nftLookup[mintAddress]) {
-        nftName = nftLookup[mintAddress]; // <--- The Magic Fix!
+        // ✅ FOUND IN FILE
+        nftName = nftLookup[mintAddress].name;   // Get Name from file
+        
+        if (nftLookup[mintAddress].image) {      // <--- NEW: Get Image from file
+            imageUrl = nftLookup[mintAddress].image;
+        }
     } 
-    // 3. Fallback: If not in file, try to use what Helius sent us
-    else if (event.nft && event.nft.name) {
-        nftName = event.nft.name;
+    // 3. FALLBACK (If not in file, try Helius data)
+    else {
+        if (event.nft && event.nft.name) nftName = event.nft.name;
+        if (event.nft && event.nft.metadata && event.nft.metadata.image) {
+            imageUrl = event.nft.metadata.image;
+        }
     }
 
     // 4. Get Image (Use fallback if Helius sends nothing)
