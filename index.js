@@ -1,3 +1,12 @@
+// --- LOAD LOCAL METADATA ---
+let nftLookup = {};
+try {
+    nftLookup = require('./hiney_data.json');
+    console.log(`✅ Loaded Metadata for ${Object.keys(nftLookup).length} Hiney-Kins`);
+} catch (e) {
+    console.log("⚠️ hiney_data.json not found (Using fallback mode)");
+}
+
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
@@ -121,7 +130,10 @@ bot.command('floor', async (ctx) => {
 
 // --- 5. SERVER & WEBHOOK ---
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => { res.send('Hineycoinbot is Alive'); });
+app.get('/', (req, res) => { 
+    console.log("💓 Ping! Staying alive..."); // <--- Add this line
+    res.send('Hineycoinbot is Alive'); 
+});
 
 app.post('/webhook', async (req, res) => {
   // 🟢 TIMEOUT FIX: Reply to Helius IMMEDIATELY so it doesn't disconnect.
@@ -134,26 +146,28 @@ app.post('/webhook', async (req, res) => {
   for (const event of events) {
     console.log(`🔎 Processing Event: ${event.type}`);
 
-    // --- A. METADATA EXTRACTION ---
+  // --- A. METADATA EXTRACTION ---
     let nftName = "Hiney-Kin (Unknown)";
     let imageUrl = GENERIC_IMAGE;
     let mintAddress = null;
 
-    if (event.nft) {
-        const nft = event.nft;
-        nftName = nft.name || nftName;
-        imageUrl = nft.metadata?.image || imageUrl;
-        mintAddress = nft.mint || mintAddress;
+    // 1. Get the Mint Address first (we need this to look up the name!)
+    if (event.nft) mintAddress = event.nft.mint;
+    else if (event.nfts && event.nfts.length > 0) mintAddress = event.nfts[0].mint;
+    else if (event.accountData && event.accountData.length > 0) mintAddress = event.accountData[0].account;
+
+    // 2. LOOKUP: Check our local file for the Real Name
+    if (mintAddress && nftLookup[mintAddress]) {
+        nftName = nftLookup[mintAddress]; // <--- The Magic Fix!
+    } 
+    // 3. Fallback: If not in file, try to use what Helius sent us
+    else if (event.nft && event.nft.name) {
+        nftName = event.nft.name;
     }
-    else if (event.nfts && event.nfts.length > 0) {
-        const nft = event.nfts[0];
-        nftName = nft.name || nftName;
-        imageUrl = nft.metadata?.image || imageUrl;
-        mintAddress = nft.mint || mintAddress;
-    }
-    else if (event.accountData && event.accountData.length > 0) {
-        mintAddress = event.accountData[0].account || null;
-        console.warn("⚠️ Falling back to accountData guess");
+
+    // 4. Get Image (Use fallback if Helius sends nothing)
+    if (event.nft && event.nft.metadata && event.nft.metadata.image) {
+        imageUrl = event.nft.metadata.image;
     }
 
     // --- B. PRICE CALCULATION ---
