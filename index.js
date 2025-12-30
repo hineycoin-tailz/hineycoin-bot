@@ -138,4 +138,129 @@ bot.start((ctx) => {
 
 bot.command('launch', (ctx) => {
     ctx.reply("🚀 Click to Launch:", { 
-        ...Markup.inlineKeyboard([[Markup.button.url("Open Hiney App
+        ...Markup.inlineKeyboard([[Markup.button.url("Open Hiney App 🍑", DIRECT_LINK)]]) 
+    });
+});
+
+bot.command('meme', async (ctx) => { await replyWithMeme(ctx, "🍑 <b>Fresh Hiney Meme!</b>"); });
+
+bot.command('price', async (ctx) => {
+  const [hiney, sol] = await Promise.all([getTokenPrice(HINEY_ADDRESS), getTokenPrice(SOL_ADDRESS)]);
+  let msg = '📊 <b>Market Snapshot</b>\n\n';
+  if (hiney) msg += `🍑 <b>$HINEY:</b> $${hiney.price} (${hiney.change}%)\n`;
+  if (sol)   msg += `☀️ <b>$SOL:</b> $${sol.price} (${sol.change}%)`;
+  await replyWithMeme(ctx, msg);
+});
+
+bot.command('hiney', async (ctx) => {
+  const hiney = await getTokenPrice(HINEY_ADDRESS);
+  if (hiney) await replyWithMeme(ctx, `🍑 <b>$HINEY Price:</b> $${hiney.price} \n📈 <b>24h Change:</b> ${hiney.change}%`);
+  else ctx.reply("❌ Could not fetch Hiney price.");
+});
+
+bot.command('sol', async (ctx) => {
+  const sol = await getTokenPrice(SOL_ADDRESS);
+  if (sol) await replyWithMeme(ctx, `☀️ <b>$SOL Price:</b> $${sol.price} \n📈 <b>24h Change:</b> ${sol.change}%`);
+  else ctx.reply("❌ Could not fetch SOL price.");
+});
+
+bot.command('floor', async (ctx) => {
+  const nftData = await getNFTFloorPrice(HINEY_NFT_SYMBOL);
+  if (!nftData) return ctx.reply("❌ NFT Data Unavailable.");
+  const msg = `🍑 <b>The Hiney-kin Stats</b>\n\n🧱 <b>Floor:</b> ${nftData.floor} SOL\n📦 <b>Listed:</b> ${nftData.listed}\n<a href="https://magiceden.io/marketplace/${HINEY_NFT_SYMBOL}">View on Magic Eden</a>`;
+  await replyWithMeme(ctx, msg);
+});
+
+// --- 5. SERVER & WEBHOOK ---
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => { 
+    console.log("💓 Ping! Staying alive..."); 
+    res.send('Hineycoinbot is Alive'); 
+});
+
+app.post('/webhook', async (req, res) => {
+  res.sendStatus(200);
+
+  console.log("📥 Webhook Hit! (Processing in background)");
+  const events = req.body;
+  if (!events || !Array.isArray(events)) return; 
+
+  for (const event of events) {
+    console.log(`🔎 Processing Event: ${event.type}`);
+
+    // --- A. METADATA ---
+    let nftName = "Hiney-Kin (Unknown)";
+    let imageUrl = GENERIC_IMAGE; 
+    let mintAddress = null;
+
+    if (event.nft) mintAddress = event.nft.mint;
+    else if (event.nfts && event.nfts.length > 0) mintAddress = event.nfts[0].mint;
+    else if (event.accountData && event.accountData.length > 0) mintAddress = event.accountData[0].account;
+
+    if (mintAddress && nftLookup[mintAddress]) {
+        nftName = nftLookup[mintAddress].name;
+        if (nftLookup[mintAddress].image) {      
+            imageUrl = nftLookup[mintAddress].image;
+        }
+    } else {
+        if (event.nft && event.nft.name) nftName = event.nft.name;
+        if (event.nft && event.nft.metadata && event.nft.metadata.image) {
+            imageUrl = event.nft.metadata.image;
+        }
+    }
+
+    // --- B. PRICE ---
+    let price = 0;
+    if (event.amount) {
+        price = event.amount / 1_000_000_000;
+    } else if (event.nativeTransfers && event.nativeTransfers.length > 0) {
+        const total = event.nativeTransfers.reduce((acc, tx) => acc + tx.amount, 0);
+        price = total / 1_000_000_000;
+    }
+
+    // --- C. FILTER ---
+    if (price < MIN_SALE_PRICE) {
+        console.log(`⚠️ Price too low (${price} SOL). Skipping.`);
+        continue;
+    }
+    
+    console.log(`💰 VALID SALE: ${price} SOL - ${nftName}`);
+
+    // 1. Telegram
+    await postSaleToTelegram(nftName, price, imageUrl, event.signature);
+
+    // 2. Twitter (Safe Mode)
+    if (twitterClient) {
+        try {
+            const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
+            
+            let twitterMediaUrl = imageUrl;
+            // If it's a video, use the fallback PFP image
+            if (imageUrl.toLowerCase().endsWith('.mp4') || imageUrl.toLowerCase().endsWith('.mov')) {
+                // ✅ UPDATED LINK: Points to "bot.jpg" (Simple, no spaces)
+                twitterMediaUrl = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/bot.jpg"; 
+                console.log("⚠️ Video detected. Switching to Static PFP for Twitter.");
+            }
+
+            const imgRes = await axios.get(twitterMediaUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
+            const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
+            
+            await twitterClient.v2.tweet({ 
+                text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, 
+                media: { media_ids: [mediaId] } 
+            });
+            console.log(`✅ Posted to X`);
+
+        } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
+    }
+  }
+});
+
+app.listen(port, '0.0.0.0', async () => { 
+  console.log(`🌐 Port ${port}`);
+  try { await bot.telegram.deleteWebhook({ drop_pending_updates: true }); bot.launch(); } 
+  catch (e) { console.error(e); }
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
