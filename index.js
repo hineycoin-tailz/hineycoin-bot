@@ -20,9 +20,6 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
-// ✅ FIXED: Using Capital .MP4 to match GitHub
-const GENERIC_IMAGE = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/video.MP4"; 
-
 // 🚨 PRICE FILTER: Set to 0.001 to see your test sales
 const MIN_SALE_PRICE = 0.035; 
 const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
@@ -48,7 +45,6 @@ try {
     });
 } catch (e) { console.log("⚠️ Twitter keys missing, skipping Twitter setup."); }
 
-
 // --- 3. HELPER FUNCTIONS ---
 
 async function postSaleToTelegram(nftName, price, image, signature) {
@@ -65,14 +61,20 @@ async function postSaleToTelegram(nftName, price, image, signature) {
 
     for (const chatId of chatIds) {
         try {
-            // Check for Video (Ends in .mp4 or .MP4)
-            if (image.toLowerCase().endsWith('.mp4')) {
-                await bot.telegram.sendVideo(chatId, image, {
-                    caption: message,
-                    parse_mode: 'Markdown'
-                });
-                console.log(`📹 Sent Video to ${chatId}`);
+            // 🎬 VIDEO LOGIC: Check if it's the specific video case
+            if (image === "LOCAL_VIDEO_MODE") {
+                // ✅ LOCAL FILE: Uses video.MP4 directly from the server folder
+                if (fs.existsSync('./video.MP4')) {
+                    await bot.telegram.sendVideo(chatId, { source: './video.MP4' }, {
+                        caption: message,
+                        parse_mode: 'Markdown'
+                    });
+                    console.log(`📹 Sent Local Video to ${chatId}`);
+                } else {
+                    console.error("❌ Error: video.MP4 not found on server!");
+                }
             } 
+            // 🖼️ NORMAL PHOTO LOGIC
             else {
                 await bot.telegram.sendPhoto(chatId, image, {
                     caption: message,
@@ -180,15 +182,11 @@ app.get('/', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
-
   console.log("📥 Webhook Hit! (Processing in background)");
   
-  // 🛡️ MAGIC FIX: Handle both single objects (PowerShell bug) and lists
+  // 🛡️ MAGIC FIX for PowerShell data
   let events = req.body;
-  if (!Array.isArray(events)) {
-      events = [events];
-  }
-
+  if (!Array.isArray(events)) { events = [events]; }
   if (!events || events.length === 0) return; 
 
   for (const event of events) {
@@ -196,7 +194,8 @@ app.post('/webhook', async (req, res) => {
 
     // --- A. METADATA ---
     let nftName = "Hiney-Kin (Unknown)";
-    let imageUrl = GENERIC_IMAGE; 
+    // Default to a placeholder, but if unknown, we use "LOCAL_VIDEO_MODE" for logic
+    let imageUrl = "LOCAL_VIDEO_MODE"; 
     let mintAddress = null;
 
     if (event.nft) mintAddress = event.nft.mint;
@@ -240,23 +239,30 @@ app.post('/webhook', async (req, res) => {
         try {
             const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
             
-            let twitterMediaUrl = imageUrl;
-            // If it's a video, use the fallback PFP image
-            if (imageUrl.toLowerCase().endsWith('.mp4') || imageUrl.toLowerCase().endsWith('.mov')) {
-                // ✅ FIXED: Using simple "bot.jpg"
-                twitterMediaUrl = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/bot.jpg"; 
-                console.log("⚠️ Video detected. Switching to Static PFP for Twitter.");
+            // ✅ Twitter Local Logic
+            if (imageUrl === "LOCAL_VIDEO_MODE" || imageUrl.toLowerCase().endsWith('.mp4')) {
+                // Upload local "bot.jpg" directly from disk
+                if (fs.existsSync('./bot.jpg')) {
+                    console.log("⚠️ Video/Default detected. Uploading local bot.jpg for Twitter.");
+                    const mediaId = await twitterClient.v1.uploadMedia('./bot.jpg');
+                    await twitterClient.v2.tweet({ 
+                        text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, 
+                        media: { media_ids: [mediaId] } 
+                    });
+                    console.log(`✅ Posted to X (Local Image)`);
+                } else {
+                    console.error("❌ Error: bot.jpg not found on server!");
+                }
+            } else {
+                // Logic for real NFT images (downloadable URLs)
+                const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
+                const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
+                await twitterClient.v2.tweet({ 
+                    text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, 
+                    media: { media_ids: [mediaId] } 
+                });
+                console.log(`✅ Posted to X (Web Image)`);
             }
-
-            const imgRes = await axios.get(twitterMediaUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
-            const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
-            
-            await twitterClient.v2.tweet({ 
-                text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, 
-                media: { media_ids: [mediaId] } 
-            });
-            console.log(`✅ Posted to X`);
-
         } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
     }
   }
