@@ -20,7 +20,7 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
-// ✅ CORRECT: Matches GitHub's Capital ".MP4"
+// ✅ FIXED: Using Capital .MP4 to match GitHub
 const GENERIC_IMAGE = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/video.MP4"; 
 
 // 🚨 PRICE FILTER: Set to 0.001 to see your test sales
@@ -182,8 +182,14 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
   console.log("📥 Webhook Hit! (Processing in background)");
-  const events = req.body;
-  if (!events || !Array.isArray(events)) return; 
+  
+  // 🛡️ MAGIC FIX: Handle both single objects (PowerShell bug) and lists
+  let events = req.body;
+  if (!Array.isArray(events)) {
+      events = [events];
+  }
+
+  if (!events || events.length === 0) return; 
 
   for (const event of events) {
     console.log(`🔎 Processing Event: ${event.type}`);
@@ -237,7 +243,7 @@ app.post('/webhook', async (req, res) => {
             let twitterMediaUrl = imageUrl;
             // If it's a video, use the fallback PFP image
             if (imageUrl.toLowerCase().endsWith('.mp4') || imageUrl.toLowerCase().endsWith('.mov')) {
-                // ✅ CORRECT: Points to "bot.jpg" which you confirmed exists!
+                // ✅ FIXED: Using simple "bot.jpg"
                 twitterMediaUrl = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/bot.jpg"; 
                 console.log("⚠️ Video detected. Switching to Static PFP for Twitter.");
             }
