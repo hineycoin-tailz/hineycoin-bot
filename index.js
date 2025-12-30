@@ -20,8 +20,8 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
-// ✅ CORRECT: This uses the simple lowercase video name
-const GENERIC_IMAGE = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/video.mp4"; 
+// ✅ CORRECT: Matches GitHub's Capital ".MP4"
+const GENERIC_IMAGE = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/video.MP4"; 
 
 // 🚨 PRICE FILTER: Set to 0.001 to see your test sales
 const MIN_SALE_PRICE = 0.035; 
@@ -237,7 +237,7 @@ app.post('/webhook', async (req, res) => {
             let twitterMediaUrl = imageUrl;
             // If it's a video, use the fallback PFP image
             if (imageUrl.toLowerCase().endsWith('.mp4') || imageUrl.toLowerCase().endsWith('.mov')) {
-                // ✅ UPDATED LINK: Points to "bot.jpg" (Simple, no spaces)
+                // ✅ CORRECT: Points to "bot.jpg" which you confirmed exists!
                 twitterMediaUrl = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/bot.jpg"; 
                 console.log("⚠️ Video detected. Switching to Static PFP for Twitter.");
             }
