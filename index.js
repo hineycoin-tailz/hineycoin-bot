@@ -191,7 +191,7 @@ app.post('/webhook', async (req, res) => {
   for (const event of events) {
     console.log(`🔎 Processing Event: ${event.type}`);
 
-    // --- A. METADATA LOGIC (Updated for your JSON format) ---
+    // --- A. METADATA LOGIC ---
     let nftName = "Hiney-Kin (Unknown)";
     let imageUrl = "LOCAL_VIDEO_MODE"; // Default to Detective Video
     let mintAddress = null;
@@ -202,24 +202,25 @@ app.post('/webhook', async (req, res) => {
 
     // 1. Try to get NAME from your JSON file
     if (mintAddress && nftLookup[mintAddress]) {
-        // Handle simple string format: "Mint": "Name"
         if (typeof nftLookup[mintAddress] === 'string') {
             nftName = nftLookup[mintAddress];
-        } 
-        // Handle object format just in case: "Mint": { "name": "Name" }
-        else if (nftLookup[mintAddress].name) {
+        } else if (nftLookup[mintAddress].name) {
             nftName = nftLookup[mintAddress].name;
             if (nftLookup[mintAddress].image) imageUrl = nftLookup[mintAddress].image;
         }
     } else {
-        // Fallback: Get NAME from the webhook event
         if (event.nft && event.nft.name) nftName = event.nft.name;
     }
 
-    // 2. Try to get IMAGE from the webhook event (if we didn't get it from JSON)
+    // 2. Try to get IMAGE from the webhook event (Checking ALL locations)
     if (imageUrl === "LOCAL_VIDEO_MODE") {
+        // Check standard 'nft' object
         if (event.nft && event.nft.metadata && event.nft.metadata.image) {
             imageUrl = event.nft.metadata.image;
+        }
+        // 🛡️ NEW FIX: Check the 'nfts' array (Used by Helius and your test command)
+        else if (event.nfts && event.nfts.length > 0 && event.nfts[0].metadata && event.nfts[0].metadata.image) {
+             imageUrl = event.nfts[0].metadata.image;
         }
     }
 
