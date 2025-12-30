@@ -20,9 +20,11 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
-// ✅ VIDEO LINK (This is your detective video)
-const GENERIC_IMAGE = "https://github.com/YOUR_USER/YOUR_REPO/raw/main/detective.MP4"; 
-const MIN_SALE_PRICE = 0.035; // Avoid 0 SOL transfers
+// 🚨 CHECK THIS LINK: It must be the RAW link to your .MP4 video on GitHub
+const GENERIC_IMAGE = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/detective.MP4"; 
+
+// 🚨 PRICE FILTER: Any sale below this amount is IGNORED. Change to 0.001 to see everything.
+const MIN_SALE_PRICE = 0.035; 
 const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
 
 // --- 2. SETUP ---
@@ -35,7 +37,7 @@ const app = express();
 app.use(express.json()); 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Twitter Setup (Wrapped in try/catch in case keys are missing)
+// Twitter Setup
 let twitterClient = null;
 try {
     twitterClient = new TwitterApi({
@@ -49,7 +51,7 @@ try {
 
 // --- 3. HELPER FUNCTIONS ---
 
-// 🆕 NEW FUNCTION: Handles Video vs Photo switching
+// 🆕 FUNCTION: Handles Video (Telegram) vs Photo (Twitter)
 async function postSaleToTelegram(nftName, price, image, signature) {
     const message = `
 🚨 *HINEY-KIN ADOPTED!* 🚨
@@ -59,7 +61,7 @@ async function postSaleToTelegram(nftName, price, image, signature) {
 🔗 [View Transaction](https://solscan.io/tx/${signature}) | [Open Hiney App](${DIRECT_LINK})
 `;
 
-    // Get Chat IDs (support single or multiple)
+    // Get Chat IDs
     const rawIds = process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID;
     const chatIds = rawIds.split(',').map(id => id.trim());
 
@@ -180,8 +182,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
-  // 🟢 TIMEOUT FIX: Reply to Helius IMMEDIATELY
-  res.sendStatus(200);
+  res.sendStatus(200); // 🟢 Reply immediately to keep Helius happy
 
   console.log("📥 Webhook Hit! (Processing in background)");
   const events = req.body;
@@ -192,7 +193,7 @@ app.post('/webhook', async (req, res) => {
 
     // --- A. METADATA EXTRACTION ---
     let nftName = "Hiney-Kin (Unknown)";
-    let imageUrl = GENERIC_IMAGE; // Start with the fallback (Video or Image)
+    let imageUrl = GENERIC_IMAGE; // Start with default (Video)
     let mintAddress = null;
 
     // 1. Get the Mint Address
@@ -200,20 +201,18 @@ app.post('/webhook', async (req, res) => {
     else if (event.nfts && event.nfts.length > 0) mintAddress = event.nfts[0].mint;
     else if (event.accountData && event.accountData.length > 0) mintAddress = event.accountData[0].account;
 
-    // 2. INTELLIGENT LOOKUP (Check local file first!)
+    // 2. INTELLIGENT LOOKUP (File Priority!)
     if (mintAddress && nftLookup[mintAddress]) {
-        // ✅ FOUND IN FILE
-        nftName = nftLookup[mintAddress].name;   
+        nftName = nftLookup[mintAddress].name; // Always take name from file
         
-        // If file has image, USE IT. Otherwise keep using GENERIC_IMAGE
+        // If file has an image, use it. Otherwise, keep GENERIC_IMAGE (Video)
         if (nftLookup[mintAddress].image) {      
             imageUrl = nftLookup[mintAddress].image;
         }
     } 
-    // 3. FALLBACK (If not in file, try Helius data)
+    // 3. FALLBACK (Helius) - Only if file lookup failed
     else {
         if (event.nft && event.nft.name) nftName = event.nft.name;
-        // Only overwrite imageUrl if Helius actually provides one
         if (event.nft && event.nft.metadata && event.nft.metadata.image) {
             imageUrl = event.nft.metadata.image;
         }
@@ -237,25 +236,31 @@ app.post('/webhook', async (req, res) => {
     // --- D. ACTION ---
     console.log(`💰 VALID SALE: ${price} SOL - ${nftName}`);
 
-    // 1. Send to Telegram (Handles Video vs Photo automatically)
+    // 1. Send to Telegram (Video or Photo)
     await postSaleToTelegram(nftName, price, imageUrl, event.signature);
 
-    // 2. Send to Twitter (Only if configured)
+    // 2. Send to Twitter (Smart Fix)
     if (twitterClient) {
         try {
             const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
-            // Note: Twitter API requires image buffers. 
-            // If imageUrl is an mp4, this simple upload might fail, so we wrap in try/catch.
-            if (!imageUrl.endsWith('.mp4') && !imageUrl.endsWith('.MP4')) {
-                const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
-                const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
-                await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, media: { media_ids: [mediaId] } });
-                console.log(`✅ Posted to X`);
-            } else {
-                 // Fallback for video tweets (Just text for now to be safe)
-                 await twitterClient.v2.tweet({ text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}` });
-                 console.log(`✅ Posted to X (Text Only for Video)`);
+            
+            // 🛑 TWITTER FIX: If it's a video, SWAP for a static image
+            let twitterMediaUrl = imageUrl;
+            if (imageUrl.toLowerCase().endsWith('.mp4') || imageUrl.toLowerCase().endsWith('.mov')) {
+                // 👇 This is your Silver Robot Image
+                twitterMediaUrl = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/image_44b4c3.jpg"; 
+                console.log("⚠️ Video detected. Switching to Static Image for Twitter.");
             }
+
+            const imgRes = await axios.get(twitterMediaUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
+            const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
+            
+            await twitterClient.v2.tweet({ 
+                text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, 
+                media: { media_ids: [mediaId] } 
+            });
+            console.log(`✅ Posted to X`);
+
         } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
     }
   }
