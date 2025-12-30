@@ -20,10 +20,10 @@ const HINEY_NFT_SYMBOL = 'hiney_kin';
 const HINEY_ADDRESS = 'DDAjZFshfVvdRew1LjYSPMB3mgDD9vSW74eQouaJnray';
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
-// 🚨 CHECK THIS LINK: It must be the RAW link to your .MP4 video on GitHub
+// ✅ CORRECTED VIDEO LINK (Matches your file list exactly)
 const GENERIC_IMAGE = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/detective.MP4"; 
 
-// 🚨 PRICE FILTER: Any sale below this amount is IGNORED. Change to 0.001 to see everything.
+// 🚨 PRICE FILTER: Set to 0.001 to see your test sales
 const MIN_SALE_PRICE = 0.035; 
 const DIRECT_LINK = 'https://t.me/Hineycoinbot/app'; 
 
@@ -51,7 +51,6 @@ try {
 
 // --- 3. HELPER FUNCTIONS ---
 
-// 🆕 FUNCTION: Handles Video (Telegram) vs Photo (Twitter)
 async function postSaleToTelegram(nftName, price, image, signature) {
     const message = `
 🚨 *HINEY-KIN ADOPTED!* 🚨
@@ -61,13 +60,12 @@ async function postSaleToTelegram(nftName, price, image, signature) {
 🔗 [View Transaction](https://solscan.io/tx/${signature}) | [Open Hiney App](${DIRECT_LINK})
 `;
 
-    // Get Chat IDs
     const rawIds = process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID;
     const chatIds = rawIds.split(',').map(id => id.trim());
 
     for (const chatId of chatIds) {
         try {
-            // CHECK: Is the image a Video? (Ends in .mp4 or .MP4)
+            // Check for Video (Ends in .mp4 or .MP4)
             if (image.toLowerCase().endsWith('.mp4')) {
                 await bot.telegram.sendVideo(chatId, image, {
                     caption: message,
@@ -75,7 +73,6 @@ async function postSaleToTelegram(nftName, price, image, signature) {
                 });
                 console.log(`📹 Sent Video to ${chatId}`);
             } 
-            // OTHERWISE: It's a standard Photo
             else {
                 await bot.telegram.sendPhoto(chatId, image, {
                     caption: message,
@@ -182,7 +179,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
-  res.sendStatus(200); // 🟢 Reply immediately to keep Helius happy
+  res.sendStatus(200);
 
   console.log("📥 Webhook Hit! (Processing in background)");
   const events = req.body;
@@ -191,34 +188,28 @@ app.post('/webhook', async (req, res) => {
   for (const event of events) {
     console.log(`🔎 Processing Event: ${event.type}`);
 
-    // --- A. METADATA EXTRACTION ---
+    // --- A. METADATA ---
     let nftName = "Hiney-Kin (Unknown)";
-    let imageUrl = GENERIC_IMAGE; // Start with default (Video)
+    let imageUrl = GENERIC_IMAGE; 
     let mintAddress = null;
 
-    // 1. Get the Mint Address
     if (event.nft) mintAddress = event.nft.mint;
     else if (event.nfts && event.nfts.length > 0) mintAddress = event.nfts[0].mint;
     else if (event.accountData && event.accountData.length > 0) mintAddress = event.accountData[0].account;
 
-    // 2. INTELLIGENT LOOKUP (File Priority!)
     if (mintAddress && nftLookup[mintAddress]) {
-        nftName = nftLookup[mintAddress].name; // Always take name from file
-        
-        // If file has an image, use it. Otherwise, keep GENERIC_IMAGE (Video)
+        nftName = nftLookup[mintAddress].name;
         if (nftLookup[mintAddress].image) {      
             imageUrl = nftLookup[mintAddress].image;
         }
-    } 
-    // 3. FALLBACK (Helius) - Only if file lookup failed
-    else {
+    } else {
         if (event.nft && event.nft.name) nftName = event.nft.name;
         if (event.nft && event.nft.metadata && event.nft.metadata.image) {
             imageUrl = event.nft.metadata.image;
         }
     }
 
-    // --- B. PRICE CALCULATION ---
+    // --- B. PRICE ---
     let price = 0;
     if (event.amount) {
         price = event.amount / 1_000_000_000;
@@ -227,29 +218,28 @@ app.post('/webhook', async (req, res) => {
         price = total / 1_000_000_000;
     }
 
-    // --- C. FILTERING ---
+    // --- C. FILTER ---
     if (price < MIN_SALE_PRICE) {
         console.log(`⚠️ Price too low (${price} SOL). Skipping.`);
         continue;
     }
     
-    // --- D. ACTION ---
     console.log(`💰 VALID SALE: ${price} SOL - ${nftName}`);
 
-    // 1. Send to Telegram (Video or Photo)
+    // 1. Telegram
     await postSaleToTelegram(nftName, price, imageUrl, event.signature);
 
-    // 2. Send to Twitter (Smart Fix)
+    // 2. Twitter (Safe Mode)
     if (twitterClient) {
         try {
             const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
             
-            // 🛑 TWITTER FIX: If it's a video, SWAP for a static image
             let twitterMediaUrl = imageUrl;
+            // If it's a video, use the fallback PFP image
             if (imageUrl.toLowerCase().endsWith('.mp4') || imageUrl.toLowerCase().endsWith('.mov')) {
-                // 👇 This is your Silver Robot Image
-                twitterMediaUrl = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/image_44b4c3.jpg"; 
-                console.log("⚠️ Video detected. Switching to Static Image for Twitter.");
+                // ✅ CORRECTED LINK: Points to your "Hineycoinbot pfp.jpg" (with %20 for spaces)
+                twitterMediaUrl = "https://raw.githubusercontent.com/tailzmetax/Hineycoinbot/main/Hineycoinbot%20pfp.jpg"; 
+                console.log("⚠️ Video detected. Switching to Static PFP for Twitter.");
             }
 
             const imgRes = await axios.get(twitterMediaUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
