@@ -61,7 +61,7 @@ async function postSaleToTelegram(nftName, price, image, signature) {
 
     for (const chatId of chatIds) {
         try {
-            // 🎬 VIDEO LOGIC: Check if it's the specific video case
+            // 🎬 VIDEO LOGIC
             if (image === "LOCAL_VIDEO_MODE") {
                 // ✅ LOCAL FILE: Uses video.MP4 directly from the server folder
                 if (fs.existsSync('./video.MP4')) {
@@ -184,7 +184,6 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
   console.log("📥 Webhook Hit! (Processing in background)");
   
-  // 🛡️ MAGIC FIX for PowerShell data
   let events = req.body;
   if (!Array.isArray(events)) { events = [events]; }
   if (!events || events.length === 0) return; 
@@ -192,23 +191,33 @@ app.post('/webhook', async (req, res) => {
   for (const event of events) {
     console.log(`🔎 Processing Event: ${event.type}`);
 
-    // --- A. METADATA ---
+    // --- A. METADATA LOGIC (Updated for your JSON format) ---
     let nftName = "Hiney-Kin (Unknown)";
-    // Default to a placeholder, but if unknown, we use "LOCAL_VIDEO_MODE" for logic
-    let imageUrl = "LOCAL_VIDEO_MODE"; 
+    let imageUrl = "LOCAL_VIDEO_MODE"; // Default to Detective Video
     let mintAddress = null;
 
     if (event.nft) mintAddress = event.nft.mint;
     else if (event.nfts && event.nfts.length > 0) mintAddress = event.nfts[0].mint;
     else if (event.accountData && event.accountData.length > 0) mintAddress = event.accountData[0].account;
 
+    // 1. Try to get NAME from your JSON file
     if (mintAddress && nftLookup[mintAddress]) {
-        nftName = nftLookup[mintAddress].name;
-        if (nftLookup[mintAddress].image) {      
-            imageUrl = nftLookup[mintAddress].image;
+        // Handle simple string format: "Mint": "Name"
+        if (typeof nftLookup[mintAddress] === 'string') {
+            nftName = nftLookup[mintAddress];
+        } 
+        // Handle object format just in case: "Mint": { "name": "Name" }
+        else if (nftLookup[mintAddress].name) {
+            nftName = nftLookup[mintAddress].name;
+            if (nftLookup[mintAddress].image) imageUrl = nftLookup[mintAddress].image;
         }
     } else {
+        // Fallback: Get NAME from the webhook event
         if (event.nft && event.nft.name) nftName = event.nft.name;
+    }
+
+    // 2. Try to get IMAGE from the webhook event (if we didn't get it from JSON)
+    if (imageUrl === "LOCAL_VIDEO_MODE") {
         if (event.nft && event.nft.metadata && event.nft.metadata.image) {
             imageUrl = event.nft.metadata.image;
         }
@@ -239,22 +248,18 @@ app.post('/webhook', async (req, res) => {
         try {
             const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
             
-            // ✅ Twitter Local Logic
             if (imageUrl === "LOCAL_VIDEO_MODE" || imageUrl.toLowerCase().endsWith('.mp4')) {
                 // Upload local "bot.jpg" directly from disk
                 if (fs.existsSync('./bot.jpg')) {
-                    console.log("⚠️ Video/Default detected. Uploading local bot.jpg for Twitter.");
                     const mediaId = await twitterClient.v1.uploadMedia('./bot.jpg');
                     await twitterClient.v2.tweet({ 
                         text: `${twitterText}\n🔗 https://solscan.io/tx/${event.signature}`, 
                         media: { media_ids: [mediaId] } 
                     });
                     console.log(`✅ Posted to X (Local Image)`);
-                } else {
-                    console.error("❌ Error: bot.jpg not found on server!");
-                }
+                } else { console.error("❌ Error: bot.jpg not found on server!"); }
             } else {
-                // Logic for real NFT images (downloadable URLs)
+                // Logic for real NFT images
                 const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
                 const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
                 await twitterClient.v2.tweet({ 
