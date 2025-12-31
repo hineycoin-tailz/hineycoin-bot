@@ -47,6 +47,22 @@ try {
 
 // --- 3. HELPER FUNCTIONS ---
 
+// 🛡️ NEW: Backup Image Fetcher (Magic Eden)
+async function fetchImageFromME(mint) {
+    try {
+        if (!mint) return null;
+        const url = `https://api-mainnet.magiceden.dev/v2/tokens/${mint}`;
+        const response = await axios.get(url, { timeout: 3000 }); // Fast 3s timeout
+        if (response.data && response.data.image) {
+            console.log("✅ Fetched missing image from Magic Eden!");
+            return response.data.image;
+        }
+    } catch (e) {
+        console.log("⚠️ Could not fetch from Magic Eden:", e.message);
+    }
+    return null;
+}
+
 async function postSaleToTelegram(nftName, price, image, signature) {
     const message = `
 🚨 *HINEY-KIN ADOPTED!* 🚨
@@ -61,9 +77,8 @@ async function postSaleToTelegram(nftName, price, image, signature) {
 
     for (const chatId of chatIds) {
         try {
-            // 🎬 VIDEO LOGIC
+            // 🎬 VIDEO LOGIC (Only if image is STILL missing)
             if (image === "LOCAL_VIDEO_MODE") {
-                // ✅ LOCAL FILE: Uses video.MP4 directly from the server folder
                 if (fs.existsSync('./video.MP4')) {
                     await bot.telegram.sendVideo(chatId, { source: './video.MP4' }, {
                         caption: message,
@@ -212,15 +227,22 @@ app.post('/webhook', async (req, res) => {
         if (event.nft && event.nft.name) nftName = event.nft.name;
     }
 
-    // 2. Try to get IMAGE from the webhook event (Checking ALL locations)
+    // 2. Try to get IMAGE from the webhook event
     if (imageUrl === "LOCAL_VIDEO_MODE") {
-        // Check standard 'nft' object
         if (event.nft && event.nft.metadata && event.nft.metadata.image) {
             imageUrl = event.nft.metadata.image;
         }
-        // 🛡️ NEW FIX: Check the 'nfts' array (Used by Helius and your test command)
         else if (event.nfts && event.nfts.length > 0 && event.nfts[0].metadata && event.nfts[0].metadata.image) {
              imageUrl = event.nfts[0].metadata.image;
+        }
+    }
+
+    // 🛡️ 3. SAFETY NET: If Image is STILL missing, ask Magic Eden!
+    if (imageUrl === "LOCAL_VIDEO_MODE" && mintAddress) {
+        console.log(`⚠️ Image missing in Webhook. Fetching from Magic Eden for ${mintAddress}...`);
+        const backupImage = await fetchImageFromME(mintAddress);
+        if (backupImage) {
+            imageUrl = backupImage;
         }
     }
 
