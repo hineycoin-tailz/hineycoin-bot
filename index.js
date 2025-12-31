@@ -47,15 +47,14 @@ try {
 
 // --- 3. HELPER FUNCTIONS ---
 
-// 🛡️ NEW: Robust Image Fetcher (HELIUS RPC)
-// Replaces the old Magic Eden fetcher
+// 🛡️ IMPROVED: Helius Fetcher with DEBUG LOGGING
 async function fetchImageFromHelius(mint) {
-    // ✅ Uses your existing key from Render Environment Variables
     const apiKey = process.env.HELIUS_API_KEY;
-    
-    if (!mint || !apiKey) return null;
+    if (!mint) { console.log("⚠️ Helius Fetch Skipped: No Mint Address"); return null; }
+    if (!apiKey) { console.log("⚠️ Helius Fetch Skipped: Missing API KEY"); return null; }
 
     try {
+        console.log(`🔄 asking Helius for asset: ${mint}`);
         const url = `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
         const response = await axios.post(url, {
             jsonrpc: '2.0',
@@ -64,12 +63,17 @@ async function fetchImageFromHelius(mint) {
             params: { id: mint }
         });
 
+        // 🔍 LOGGING THE RESULT
         if (response.data.result && response.data.result.content && response.data.result.content.links) {
-            console.log("✅ Fetched image from Helius!");
-            return response.data.result.content.links.image;
+            const img = response.data.result.content.links.image;
+            console.log(`✅ Helius FOUND image: ${img}`);
+            return img;
+        } else {
+            console.log(`⚠️ Helius response valid but NO image found. Full response result:`, JSON.stringify(response.data.result?.content || "No Content"));
         }
     } catch (e) {
-        console.log("⚠️ Helius fetch failed:", e.message);
+        console.log("❌ Helius Fetch ERROR:", e.message);
+        if (e.response) console.log("Error Details:", e.response.data);
     }
     return null;
 }
@@ -251,10 +255,13 @@ app.post('/webhook', async (req, res) => {
     // 🛡️ 3. SAFETY NET: If Image is STILL missing, ask Helius!
     if (imageUrl === "LOCAL_VIDEO_MODE" && mintAddress) {
         console.log(`⚠️ Image missing in Webhook. Asking Helius for ${mintAddress}...`);
-        // ✅ CALLS THE NEW HELIUS FUNCTION
+        
+        // 🚨 LOGGING FOR DEBUGGING
         const backupImage = await fetchImageFromHelius(mintAddress);
         if (backupImage) {
             imageUrl = backupImage;
+        } else {
+            console.log("❌ Helius also failed to find an image.");
         }
     }
 
@@ -274,6 +281,9 @@ app.post('/webhook', async (req, res) => {
     }
     
     console.log(`💰 VALID SALE: ${price} SOL - ${nftName}`);
+    
+    // 🔍 FINAL CHECK LOG BEFORE TWITTER
+    console.log(`🖼️ FINAL IMAGE URL to Post: ${imageUrl}`);
 
     // 1. Telegram
     await postSaleToTelegram(nftName, price, imageUrl, event.signature);
@@ -285,6 +295,7 @@ app.post('/webhook', async (req, res) => {
             
             if (imageUrl === "LOCAL_VIDEO_MODE" || imageUrl.toLowerCase().endsWith('.mp4')) {
                 // Upload local "bot.jpg" directly from disk
+                console.log("ℹ️ Using Fallback LOCAL Image (bot.jpg)");
                 if (fs.existsSync('./bot.jpg')) {
                     const mediaId = await twitterClient.v1.uploadMedia('./bot.jpg');
                     await twitterClient.v2.tweet({ 
@@ -295,6 +306,7 @@ app.post('/webhook', async (req, res) => {
                 } else { console.error("❌ Error: bot.jpg not found on server!"); }
             } else {
                 // Logic for real NFT images
+                console.log("ℹ️ Attempting to download Web Image...");
                 const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
                 const mediaId = await twitterClient.v1.uploadMedia(Buffer.from(imgRes.data), { mimeType: 'image/png' });
                 await twitterClient.v2.tweet({ 
@@ -303,7 +315,10 @@ app.post('/webhook', async (req, res) => {
                 });
                 console.log(`✅ Posted to X (Web Image)`);
             }
-        } catch (e) { console.error(`❌ Twitter Fail: ${e.message}`); }
+        } catch (e) { 
+            console.error(`❌ Twitter Fail: ${e.message}`); 
+            if (e.data) console.error("Twitter Error Details:", JSON.stringify(e.data));
+        }
     }
   }
 });
