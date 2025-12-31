@@ -47,18 +47,29 @@ try {
 
 // --- 3. HELPER FUNCTIONS ---
 
-// 🛡️ NEW: Backup Image Fetcher (Magic Eden)
-async function fetchImageFromME(mint) {
+// 🛡️ NEW: Robust Image Fetcher (HELIUS RPC)
+// Replaces the old Magic Eden fetcher
+async function fetchImageFromHelius(mint) {
+    // ✅ Uses your existing key from Render Environment Variables
+    const apiKey = process.env.HELIUS_API_KEY;
+    
+    if (!mint || !apiKey) return null;
+
     try {
-        if (!mint) return null;
-        const url = `https://api-mainnet.magiceden.dev/v2/tokens/${mint}`;
-        const response = await axios.get(url, { timeout: 3000 }); // Fast 3s timeout
-        if (response.data && response.data.image) {
-            console.log("✅ Fetched missing image from Magic Eden!");
-            return response.data.image;
+        const url = `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
+        const response = await axios.post(url, {
+            jsonrpc: '2.0',
+            id: 'hiney-bot',
+            method: 'getAsset',
+            params: { id: mint }
+        });
+
+        if (response.data.result && response.data.result.content && response.data.result.content.links) {
+            console.log("✅ Fetched image from Helius!");
+            return response.data.result.content.links.image;
         }
     } catch (e) {
-        console.log("⚠️ Could not fetch from Magic Eden:", e.message);
+        console.log("⚠️ Helius fetch failed:", e.message);
     }
     return null;
 }
@@ -237,10 +248,11 @@ app.post('/webhook', async (req, res) => {
         }
     }
 
-    // 🛡️ 3. SAFETY NET: If Image is STILL missing, ask Magic Eden!
+    // 🛡️ 3. SAFETY NET: If Image is STILL missing, ask Helius!
     if (imageUrl === "LOCAL_VIDEO_MODE" && mintAddress) {
-        console.log(`⚠️ Image missing in Webhook. Fetching from Magic Eden for ${mintAddress}...`);
-        const backupImage = await fetchImageFromME(mintAddress);
+        console.log(`⚠️ Image missing in Webhook. Asking Helius for ${mintAddress}...`);
+        // ✅ CALLS THE NEW HELIUS FUNCTION
+        const backupImage = await fetchImageFromHelius(mintAddress);
         if (backupImage) {
             imageUrl = backupImage;
         }
