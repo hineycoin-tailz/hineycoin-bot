@@ -45,7 +45,7 @@ try {
 
 // --- 3. HELPER FUNCTIONS ---
 
-// 🛡️ AGGRESSIVE HELIUS FETCHER
+// 🛡️ "DEEP DIG" HELIUS FETCHER
 async function fetchImageFromHelius(mint) {
     const apiKey = process.env.HELIUS_API_KEY;
     if (!mint || !apiKey) return null;
@@ -59,21 +59,28 @@ async function fetchImageFromHelius(mint) {
 
         const result = response.data.result;
         if (result && result.content) {
-            // Check Location 1: Standard Links
+            // 1. Check Standard Link
             if (result.content.links && result.content.links.image) {
-                console.log(`✅ Helius Image Found (Links): ${result.content.links.image}`);
+                console.log(`✅ Helius Found Direct Link: ${result.content.links.image}`);
                 return result.content.links.image;
             }
-            // Check Location 2: Files Array (CDN/IPFS)
-            if (result.content.files && result.content.files.length > 0 && result.content.files[0].uri) { // Fixed: files[0].uri, not cdn_uri
-                 console.log(`✅ Helius Image Found (Files): ${result.content.files[0].uri}`);
+            // 2. Check Files Array
+            if (result.content.files && result.content.files.length > 0 && result.content.files[0].uri && result.content.files[0].mime?.startsWith('image')) {
+                 console.log(`✅ Helius Found File URI: ${result.content.files[0].uri}`);
                  return result.content.files[0].uri;
             }
-            // Check Location 3: JSON Metadata
+            // 3. 🛡️ DEEP DIG: Fetch the JSON Metadata
              if (result.content.json_uri) {
-                 console.log(`✅ Helius Image Found (JSON URI): ${result.content.json_uri}`);
-                 // Note: Ideally we'd fetch this JSON, but usually the image is in links/files too.
-                 return result.content.json_uri; 
+                 console.log(`⛏️ Image buried in JSON. Digging into: ${result.content.json_uri}`);
+                 try {
+                    const metadataRes = await axios.get(result.content.json_uri);
+                    if (metadataRes.data && metadataRes.data.image) {
+                        console.log(`✅ FOUND Buried Image: ${metadataRes.data.image}`);
+                        return metadataRes.data.image;
+                    }
+                 } catch (err) {
+                     console.log(`❌ Failed to dig into JSON: ${err.message}`);
+                 }
             }
         }
         console.log(`⚠️ Helius response valid but NO image paths found.`);
@@ -179,7 +186,7 @@ app.post('/webhook', async (req, res) => {
   let events = req.body;
   if (!Array.isArray(events)) { events = [events]; }
   
-  // 🔍 LOG RAW DATA (To diagnose missing data)
+  // 🔍 LOG RAW DATA (Check logs if image fails again)
   console.log("RAW EVENT SAMPLE:", JSON.stringify(events[0], null, 2));
 
   for (const event of events) {
@@ -190,7 +197,7 @@ app.post('/webhook', async (req, res) => {
     // --- AGGRESSIVE MINT FINDER ---
     if (event.nft && event.nft.mint) mintAddress = event.nft.mint;
     else if (event.nfts && event.nfts.length > 0) mintAddress = event.nfts[0].mint;
-    else if (event.tokenTransfers && event.tokenTransfers.length > 0) mintAddress = event.tokenTransfers[0].mint; // NEW: Check token transfers
+    else if (event.tokenTransfers && event.tokenTransfers.length > 0) mintAddress = event.tokenTransfers[0].mint;
     else if (event.accountData && event.accountData.length > 0) mintAddress = event.accountData[0].account;
 
     console.log(`🔎 Detected Mint: ${mintAddress || "NONE"}`);
@@ -207,7 +214,7 @@ app.post('/webhook', async (req, res) => {
     if (event.nft && event.nft.metadata && event.nft.metadata.image) imageUrl = event.nft.metadata.image;
     else if (event.nfts && event.nfts.length > 0 && event.nfts[0].metadata && event.nfts[0].metadata.image) imageUrl = event.nfts[0].metadata.image;
 
-    // 3. SAFETY NET (Helius)
+    // 3. SAFETY NET (Helius Deep Dig)
     if (imageUrl === "LOCAL_VIDEO_MODE" && mintAddress) {
         console.log(`⚠️ Fetching backup image for ${mintAddress}...`);
         const backupImage = await fetchImageFromHelius(mintAddress);
