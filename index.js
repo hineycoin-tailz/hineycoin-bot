@@ -45,49 +45,69 @@ try {
 
 // --- 3. HELPER FUNCTIONS ---
 
-// 🛡️ "DEEP DIG" HELIUS FETCHER
-async function fetchImageFromHelius(mint) {
-    const apiKey = process.env.HELIUS_API_KEY;
-    if (!mint || !apiKey) return null;
+// 🔗 IPFS UNLOCKER (Fixes 'ipfs://' links)
+function resolveIpfs(url) {
+    if (!url) return null;
+    if (url.startsWith('ipfs://')) {
+        return url.replace('ipfs://', 'https://ipfs.io/ipfs/');
+    }
+    return url;
+}
 
+// 🧙‍♂️ MAGIC EDEN FALLBACK (Backup Source)
+async function fetchImageFromMagicEden(mint) {
     try {
-        console.log(`🔄 Asking Helius for: ${mint}`);
-        const url = `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
-        const response = await axios.post(url, {
-            jsonrpc: '2.0', id: 'hiney-bot', method: 'getAsset', params: { id: mint }
-        });
-
-        const result = response.data.result;
-        if (result && result.content) {
-            // 1. Check Standard Link
-            if (result.content.links && result.content.links.image) {
-                console.log(`✅ Helius Found Direct Link: ${result.content.links.image}`);
-                return result.content.links.image;
-            }
-            // 2. Check Files Array
-            if (result.content.files && result.content.files.length > 0 && result.content.files[0].uri && result.content.files[0].mime?.startsWith('image')) {
-                 console.log(`✅ Helius Found File URI: ${result.content.files[0].uri}`);
-                 return result.content.files[0].uri;
-            }
-            // 3. 🛡️ DEEP DIG: Fetch the JSON Metadata
-             if (result.content.json_uri) {
-                 console.log(`⛏️ Image buried in JSON. Digging into: ${result.content.json_uri}`);
-                 try {
-                    const metadataRes = await axios.get(result.content.json_uri);
-                    if (metadataRes.data && metadataRes.data.image) {
-                        console.log(`✅ FOUND Buried Image: ${metadataRes.data.image}`);
-                        return metadataRes.data.image;
-                    }
-                 } catch (err) {
-                     console.log(`❌ Failed to dig into JSON: ${err.message}`);
-                 }
-            }
+        const url = `https://api-mainnet.magiceden.dev/v2/tokens/${mint}`;
+        const response = await axios.get(url, { timeout: 3000 });
+        if (response.data && response.data.image) {
+            console.log(`✅ Magic Eden Found Image: ${response.data.image}`);
+            return response.data.image;
         }
-        console.log(`⚠️ Helius response valid but NO image paths found.`);
     } catch (e) {
-        console.log("❌ Helius Fetch ERROR:", e.message);
+        // ME often 404s on unlisted items, so we just ignore errors silently
     }
     return null;
+}
+
+// 🛡️ SUPER FETCHER (Helius + Magic Eden + IPFS Fix)
+async function fetchImageFromAnywhere(mint) {
+    const apiKey = process.env.HELIUS_API_KEY;
+    if (!mint) return null;
+
+    let foundImage = null;
+
+    // TRY 1: HELIUS
+    if (apiKey) {
+        try {
+            console.log(`🔄 Asking Helius for: ${mint}`);
+            const url = `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
+            const response = await axios.post(url, {
+                jsonrpc: '2.0', id: 'hiney-bot', method: 'getAsset', params: { id: mint }
+            });
+
+            const result = response.data.result;
+            if (result && result.content) {
+                if (result.content.links && result.content.links.image) foundImage = result.content.links.image;
+                else if (result.content.files && result.content.files.length > 0 && result.content.files[0].uri) foundImage = result.content.files[0].uri;
+                else if (result.content.json_uri) {
+                     // Deep dig
+                     try {
+                        const meta = await axios.get(result.content.json_uri);
+                        if (meta.data && meta.data.image) foundImage = meta.data.image;
+                     } catch (e) { console.log("❌ JSON Dig failed"); }
+                }
+            }
+        } catch (e) { console.log("❌ Helius Fetch Error:", e.message); }
+    }
+
+    // TRY 2: MAGIC EDEN (If Helius failed)
+    if (!foundImage || foundImage.includes("undefined")) {
+        console.log("⚠️ Helius failed. Asking Magic Eden...");
+        foundImage = await fetchImageFromMagicEden(mint);
+    }
+
+    // FINAL FIX: Resolve IPFS
+    return resolveIpfs(foundImage);
 }
 
 async function postSaleToTelegram(nftName, price, image, signature) {
@@ -185,9 +205,6 @@ app.post('/webhook', async (req, res) => {
   
   let events = req.body;
   if (!Array.isArray(events)) { events = [events]; }
-  
-  // 🔍 LOG RAW DATA (Check logs if image fails again)
-  console.log("RAW EVENT SAMPLE:", JSON.stringify(events[0], null, 2));
 
   for (const event of events) {
     let nftName = "Hiney-Kin (Unknown)";
@@ -214,10 +231,13 @@ app.post('/webhook', async (req, res) => {
     if (event.nft && event.nft.metadata && event.nft.metadata.image) imageUrl = event.nft.metadata.image;
     else if (event.nfts && event.nfts.length > 0 && event.nfts[0].metadata && event.nfts[0].metadata.image) imageUrl = event.nfts[0].metadata.image;
 
-    // 3. SAFETY NET (Helius Deep Dig)
-    if (imageUrl === "LOCAL_VIDEO_MODE" && mintAddress) {
+    // 3. SAFETY NET (Super Fetcher)
+    // If webhook image is missing OR it's an IPFS link we need to fix
+    imageUrl = resolveIpfs(imageUrl);
+    
+    if ((imageUrl === "LOCAL_VIDEO_MODE" || !imageUrl) && mintAddress) {
         console.log(`⚠️ Fetching backup image for ${mintAddress}...`);
-        const backupImage = await fetchImageFromHelius(mintAddress);
+        const backupImage = await fetchImageFromAnywhere(mintAddress);
         if (backupImage) imageUrl = backupImage;
     }
 
@@ -231,14 +251,14 @@ app.post('/webhook', async (req, res) => {
     if (price < MIN_SALE_PRICE) continue;
     
     // --- POSTING ---
-    await postSaleToTelegram(nftName, price, imageUrl, event.signature);
+    await postSaleToTelegram(nftName, price, imageUrl || "LOCAL_VIDEO_MODE", event.signature);
 
     if (twitterClient) {
         try {
             const twitterText = `🚨 HINEY-KIN ADOPTED! \n\n🖼️ ${nftName} just sold for ${price.toFixed(4)} SOL!\n#Solana $HINEY`;
             let mediaId;
 
-            if (imageUrl === "LOCAL_VIDEO_MODE" || !imageUrl.startsWith('http')) {
+            if (!imageUrl || imageUrl === "LOCAL_VIDEO_MODE" || !imageUrl.startsWith('http')) {
                 if (fs.existsSync('./bot.jpg')) mediaId = await twitterClient.v1.uploadMedia('./bot.jpg');
             } else {
                 const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', headers: { 'User-Agent': 'Chrome/110' } });
